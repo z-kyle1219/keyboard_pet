@@ -1,0 +1,12 @@
+[project]
+name = "keyboard-pet"
+version = "0.1.0"
+description = "记录每天键盘点击次数的桌面宠物"
+requires-python = ">=3.8"
+dependencies = [
+    "pynput",
+    "pillow",
+]
+
+[tool.uv]
+package = false
