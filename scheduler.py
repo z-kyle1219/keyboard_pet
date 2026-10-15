@@ -15,7 +15,10 @@ def midnight_loop(manager):
 
 
 def periodic_save(manager):
-    """每 60 秒把当前次数落库一次，防止意外退出丢数据。"""
+    """每 20 秒把当前次数与各键次数落库一次，防止意外退出丢数据。
+
+    间隔缩短到 20 秒：关机/强杀最多丢最后 20 秒，降低数据丢失窗口。
+    """
     while True:
-        time.sleep(60)
+        time.sleep(20)
         manager.persist()
