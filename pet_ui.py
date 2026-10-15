@@ -173,10 +173,9 @@ class PetApp:
         昨天已封存，才能展示真正的冠军键（揭晓谜底 + 上场动画）。
         """
         from datetime import datetime, timedelta
-        today = datetime.now().strftime('%Y-%m-%d')
         yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        today_mvp = '?'
-        y_mvp = '-'  # 昨天冠军文案
+        today_mvp = '?'   # 今日盲盒：当天结束前不揭晓
+        y_mvp = None      # 昨天冠军文案（无数据时保持 None）
         y_name = None
         tops = db.get_top_keys(yesterday)
         if tops:
@@ -200,7 +199,7 @@ class PetApp:
         count = self.manager.current_count()
         today_mvp, y_mvp, y_name = self._mvp_info()
         mvp_items = [
-            {'label': '今天', 'display': f'今天MVP ?', 'animate': False},
+            {'label': '今天', 'display': f'今天MVP {today_mvp}', 'animate': False},
         ]
         if y_name is not None:
             mvp_items.append({'label': '昨天',
