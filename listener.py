@@ -13,7 +13,7 @@ class KeyListener:
     def _on_press(self, key):
         # 计数异常时记录日志，但绝不影响后续键盘监听
         try:
-            self.manager.increment()
+            self.manager.increment(key)
         except Exception:
             logger.exception('按键计数异常')
 

@@ -57,6 +57,8 @@ config.json
 
 # 探测/临时文件
 _probe.txt
+_compile_check.py
+_compile_ok.txt
 
 # ===================== 编辑器 / IDE / 系统 =====================
 .vscode/
