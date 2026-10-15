@@ -11,10 +11,10 @@ keyboard_pet/
 ├── autostart.py         # 开机自启动（启动文件夹 + VBS 静默启动器）
 ├── logger.py            # 运行日志（写入 pet.log，避免异常无声消失）
 ├── config.py            # 配置与路径（find_icon 自动扫描 assets/ 图标）
-├── db.py                # SQLite 数据层（daily_stats 表，按天聚合）
-├── tracker.py           # 计数核心：线程安全的当天计数 + 跨天滚动
+├── db.py                # SQLite 数据层（daily_stats 按天聚合 + daily_key_stats 按键明细）
+├── tracker.py           # 计数核心：线程安全的当天计数 + 按键明细 + 跨天滚动
 ├── listener.py          # 全局键盘监听（pynput，仅键盘）
-├── scheduler.py         # 后台线程：24:00 跨天刷新 + 每 60s 落库
+├── scheduler.py         # 后台线程：24:00 跨天刷新 + 每 20s 落库
 ├── pet_ui.py            # 桌宠界面：透明漂浮窗 + 左键气泡 + 右键菜单 + 图标处理
 │
 ├── assets/              # 资源目录
@@ -38,11 +38,11 @@ keyboard_pet/
 | **autostart.py** | 开机自启动 | 「启动」文件夹写入 `KeyboardPet.vbs`，用 pythonw 无窗口启动 main.py；开启/关闭 |
 | **logger.py** | 日志 | 写入 `pet.log`（UTF-8）；配合各模块排查运行时问题 |
 | **config.py** | 路径与配置 | `find_icon()` 自动扫描 `assets/` 取第一张图片；JSON 持久化 |
-| **db.py** | 数据存取 | `daily_stats(date PRIMARY KEY, count)` 按天一行；支持读写/查近7天/查全部历史 |
-| **tracker.py** | 计数核心 | 线程安全 `Lock`；跨天归档；重启恢复当天次数 |
+| **db.py** | 数据存取 | `daily_stats` 按天聚合 + `daily_key_stats` 按键明细；提供 `get_daily_mvp` 冠军键查询 |
+| **tracker.py** | 计数核心 | 线程安全 `Lock`；累计各键次数；跨天归档；重启恢复当天数据 |
 | **listener.py** | 键盘监听 | `pynput.keyboard.Listener`；仅键盘（含修饰键），鼠标不计 |
-| **scheduler.py** | 定时任务 | `midnight_loop` 等 24:00 跨天滚动；`periodic_save` 每 60s 落库 |
-| **pet_ui.py** | 界面交互 | 透明漂浮窗、拖拽、左键气泡、右键表格、`make_pet_image` 圆角处理 |
+| **scheduler.py** | 定时任务 | `midnight_loop` 等 24:00 跨天滚动；`periodic_save` 每 20s 落库 |
+| **pet_ui.py** | 界面交互 | 透明漂浮窗、拖拽、左键气泡（含 MVP 徽章）、右键表格（含 MVP 列）、`make_pet_image` 圆角处理 |
 
 ## 三、数据模型
 
@@ -51,10 +51,17 @@ CREATE TABLE daily_stats (
     date  TEXT PRIMARY KEY,   -- '2026-10-12'
     count INTEGER NOT NULL    -- 当天总次数（仅键盘，含修饰键）
 );
+
+CREATE TABLE daily_key_stats (
+    date  TEXT NOT NULL,      -- '2026-10-12'
+    key   TEXT NOT NULL,      -- 按键名（如 'e'、'space'）
+    count INTEGER NOT NULL,   -- 该键当天次数
+    PRIMARY KEY (date, key)
+);
 ```
 
-- 每天 24:00：把当天 `count` 写入该表 → 清空 → 开始新的一天
-- `db.get_recent_days(7)`：查询最近 7 天记录（右键"查看历史"）
+- 每天 24:00：把当天总次数与各键次数写入上述两表 → 清空 → 开始新的一天
+- `db.get_daily_mvp(days)`：查询历史记录（日期 | 次数 | MVP 键）；MVP 键仅从 26 个英文字母中选出
 
 ## 四、图标方案
 
@@ -79,14 +86,14 @@ python main.py
 | 操作 | 效果 |
 |------|------|
 | 拖动图标 | 拖到任意位置 |
-| 左键单击 | 弹气泡「宝宝今天点击键盘的次数是 X，快去休息吧~」 |
-| 右键 → 最近 7 天 | 弹出表格，展示近 7 天记录（日期 | 次数） |
-| 右键 → 历史所有 | 弹出表格，展示全部历史记录（日期 | 次数） |
+| 左键单击 | 弹气泡：今日次数 + 今日 MVP（盲盒「?」）+ 昨日 MVP（冠军登场动画） |
+| 右键 → 最近 7 天 | 弹出表格，展示近 7 天记录（日期 | 次数 | MVP 键） |
+| 右键 → 历史所有 | 弹出表格，展示全部历史记录（日期 | 次数 | MVP 键） |
 | 右键 → 更换图标 | 上传自定义图片 |
 | 右键 → 开机自启动 | 切换开关；勾选 = 开机自动常驻 |
 | 右键 → 退出 | 退出程序（自动落库） |
 
-> 历史查看统一使用 `ttk.Treeview` 表格呈现，带「日期」「次数」两列表头及滚动条。
+> 历史查看统一使用 `ttk.Treeview` 表格呈现，带「日期」「次数」「MVP 键」三列表头及纵向/横向滚动条。
 
 ## 七、健壮性与设计细节
 
@@ -102,4 +109,3 @@ python main.py
 3. **气泡跟随**：拖拽图标时，已显示的悬浮气泡通过 `_on_motion` 同步重定位，不再留在原地（`_active_popup` + `_popup_offset`）。
 4. **历史表格美化**：`_show_table` 用粉色头部卡片 + `ttk.Style`（行高 32、隔行变色、清晰微软雅黑 UI 字体），并 try/except 兜底样式失败。
 5. **菜单字体**：右键菜单用 `Microsoft YaHei UI` 和主色高亮，更清晰时尚。
-

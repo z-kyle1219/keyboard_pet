@@ -49,28 +49,6 @@ def get_count(date_str):
     return row[0] if row else 0
 
 
-def get_recent_days(n=7):
-    """返回最近 n 天的记录，按日期倒序（最新在前）。"""
-    conn = _connect()
-    rows = conn.execute(
-        'SELECT date, count FROM daily_stats '
-        'ORDER BY date DESC LIMIT ?', (n,)
-    ).fetchall()
-    conn.close()
-    return rows
-
-
-def get_all_days():
-    """返回全部历史记录，按日期倒序（最新在前）。"""
-    conn = _connect()
-    rows = conn.execute(
-        'SELECT date, count FROM daily_stats '
-        'ORDER BY date DESC'
-    ).fetchall()
-    conn.close()
-    return rows
-
-
 def save_key_counts(date_str, key_counts):
     """批量写入某天各键的计数。key_counts 形如 {'e': 612, 'space': 720}。"""
     conn = _connect()
