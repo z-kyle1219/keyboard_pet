@@ -283,7 +283,14 @@ class PetApp:
         badges_h = badge_len * (badge_h + badge_gap)
 
         max_w = max((font.measure(l) for l in lines), default=wrap)
-        w = max(max_w + pad_x * 2, 200)
+        # 徽章文字用 tkfont 实测宽度（随 DPI 缩放），据此撑大气泡，
+        # 避免徽章椭圆被 w-40 截断后白字溢出到白色背景上"隐身"
+        badge_font = tkfont.Font(family='Microsoft YaHei UI', size=12,
+                                 weight='bold')
+        badges_req = max(
+            (badge_font.measure(m['display']) for m in (mvps or [])),
+            default=0) + 48  # 椭圆左右各留 24px 内边距
+        w = max(max_w + pad_x * 2, badges_req + 40, 200)
         h = len(lines) * line_h + pad_y * 2 + badges_h
         h = max(h, 46)
         wrap_final = w - pad_x * 2
@@ -361,65 +368,95 @@ class PetApp:
 
         animate=True 表示已揭晓（粉色实心 + 白色文字）；
         animate=False 表示盲盒（金色实心 + 深琥珀文字）。
-        geoms 形如 {'oval': oid, 'txt': tid, 'x1':.., 'y1':.., 'x2':..,
+        geoms 形如 {'box': bid, 'txt': tid, 'x1':.., 'y1':.., 'x2':..,
         'y2':.., 'cx':.., 'cy':.., 'bw':..}，供「摇摆登场」绝对定位。
         """
         badge_h = 30
         cx = w // 2
         cy = y_top + badge_h // 2
-        badge_w = min(max(80, 16 * len(badge_text) + 48), w - 40)
+        # 用 tkfont 实测文字宽度（随系统 DPI 缩放），再加左右内边距，
+        # 替代原先 16*len+48 的粗略估算——高 DPI 下估算偏小，
+        # 会导致白色文字超出粉色底、与白色背景混在一起"隐身"
+        badge_font = tkfont.Font(family='Microsoft YaHei UI', size=12,
+                                 weight='bold')
+        text_w = badge_font.measure(badge_text)
+        badge_w = min(max(80, text_w + 48), w - 40)
         x1 = cx - badge_w / 2
         x2 = cx + badge_w / 2
         y1 = y_top
         y2 = y_top + badge_h
         color = PRIMARY if animate else '#f0a92e'
         text_color = 'white' if animate else '#5a3d00'
-        oval = canvas.create_oval(x1, y1, x2, y2, fill=color, outline='')
+        box = canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline='')
         txt = canvas.create_text(cx, cy, text=badge_text, fill=text_color,
                                  font=('Microsoft YaHei UI', 12, 'bold'))
-        geoms = {'oval': oval, 'txt': txt, 'x1': x1, 'y1': y1,
+        geoms = {'box': box, 'txt': txt, 'x1': x1, 'y1': y1,
                  'x2': x2, 'y2': y2, 'cx': cx, 'cy': cy, 'bw': badge_w}
         return cx, cy, geoms
 
     def _badge_enter_animation(self, canvas, cx, cy, geoms):
-        """冠军登场：徽章摇摆登场（绝对定位、振幅衰减归位）+ 双圈光环 + 放射闪光。
+        """冠军登场：徽章摇摆登场（绝对定位、振幅衰减归位）+ 单圈扩散光环 + 放射闪光。
 
         Canvas 逐帧重绘缩放文本易模糊，故「摇摆」用水平绝对位移模拟，
         叠加向外扩散的光环与放射线，营造「冠军登场」的聚光效果。
+        特效元素统一打 'fx' 标签；且每画一个特效就把徽章（底条+文字）
+        重新提到最顶层，保证动画全程文字清晰可见；
+        动画结束后统一删除特效，只留干净的徽章。
         """
         import math
+
+        def _raise_badge():
+            # Canvas 中后创建的元素在上层，特效会盖住先画的徽章文字，
+            # 故每次画完特效后把徽章底条和文字重新提到最顶
+            canvas.tag_raise(geoms['box'])
+            canvas.tag_raise(geoms['txt'])
+
         try:
-            # 1) 双圈光环先后向外扩散
+            # 1) 双圈光环先后向外扩散：新圈出现时删除上一圈，只保留单圈扩散
+            last_ring = {'a': None, 'b': None}
+
+            def _ring(series, r, color, width):
+                if last_ring[series] is not None:
+                    canvas.delete(last_ring[series])
+                oid = canvas.create_oval(
+                    cx - r, cy - r, cx + r, cy + r,
+                    outline=color, width=width, tags='fx')
+                last_ring[series] = oid
+                _raise_badge()
+
             for step in range(1, 8):
-                r = 8 + step * 7
                 aid = canvas.after(int(step * 40), (
-                    lambda r=r: canvas.create_oval(
-                        cx - r, cy - r, cx + r, cy + r,
-                        outline=PRIMARY, width=2)))
+                    lambda r=8 + step * 7: _ring('a', r, PRIMARY, 2)))
                 self._popup_after_ids.append(aid)
             for step in range(1, 8):
-                r = 6 + step * 6
                 aid = canvas.after(int(step * 40 + 160), (
-                    lambda r=r: canvas.create_oval(
-                        cx - r, cy - r, cx + r, cy + r,
-                        outline='#ffb3c9', width=1)))
+                    lambda r=6 + step * 6: _ring('b', r, '#ffb3c9', 1)))
                 self._popup_after_ids.append(aid)
 
-            # 2) 放射闪光：8 条线从中心向外（逐帧变长 + 微转）
+            # 2) 放射闪光：8 条线从中心向外（逐帧变长 + 微转），
+            #    每帧先清除上一帧的线条，避免线条层层堆积
+            prev_lines = []
+
+            def _flash(rr, st):
+                for lid in prev_lines:
+                    canvas.delete(lid)
+                prev_lines.clear()
+                for a in range(8):
+                    ang = a * math.pi / 4 + st * 0.15
+                    x1 = cx + math.cos(ang) * 5
+                    y1 = cy + math.sin(ang) * 5
+                    x2 = cx + math.cos(ang) * rr
+                    y2 = cy + math.sin(ang) * rr
+                    lid = canvas.create_line(x1, y1, x2, y2,
+                                             fill=PRIMARY, width=1,
+                                             tags='fx')
+                    prev_lines.append(lid)
+                _raise_badge()
+
             for step in range(1, 6):
                 reach = 6 + step * 7
-
-                def _flash(rr=reach, st=step):
-                    for a in range(8):
-                        ang = a * math.pi / 4 + st * 0.15
-                        x1 = cx + math.cos(ang) * 5
-                        y1 = cy + math.sin(ang) * 5
-                        x2 = cx + math.cos(ang) * rr
-                        y2 = cy + math.sin(ang) * rr
-                        canvas.create_line(x1, y1, x2, y2,
-                                           fill=PRIMARY, width=1)
-
-                aid = canvas.after(int(step * 45), _flash)
+                aid = canvas.after(int(step * 45),
+                                   lambda rr=reach, st=step: _flash(rr, st))
                 self._popup_after_ids.append(aid)
 
             # 3) 徽章摇摆登场：水平绝对位移，振幅衰减后归位
@@ -431,13 +468,21 @@ class PetApp:
             moves.append(0)
             for i, off in enumerate(moves):
                 def _sw(off=off):
-                    canvas.coords(geoms['oval'],
+                    canvas.coords(geoms['box'],
                                   geoms['x1'] + off, geoms['y1'],
                                   geoms['x2'] + off, geoms['y2'])
                     canvas.coords(geoms['txt'],
                                   geoms['cx'] + off, geoms['cy'])
                 aid = canvas.after(int(i * 45), _sw)
                 self._popup_after_ids.append(aid)
+
+            # 4) 动画全部结束后清除所有光环与闪光，露出干净的徽章文字
+            def _cleanup_fx():
+                canvas.delete('fx')
+                _raise_badge()
+
+            aid = canvas.after(800, _cleanup_fx)
+            self._popup_after_ids.append(aid)
         except Exception:
             logger.exception('冠军登场动画失败')
 
