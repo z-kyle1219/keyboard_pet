@@ -25,6 +25,7 @@ from logger import logger
 
 # 用这种不常见颜色做"抠底"透明色
 TRANSPARENT = '#ff00ff'
+TRANSPARENT_RGB = (255, 0, 255)
 
 # 时尚配色：主色（水母粉）、深色文字、浅色底
 PRIMARY = '#ff7aa2'
@@ -32,52 +33,133 @@ PRIMARY_DARK = '#ff4d80'
 TEXT_DARK = '#2b2b2b'
 TEXT_MUTED = '#8a8a8a'
 
+# ---------- 桌宠渲染与动画参数 ----------
+IDLE_FRAMES = 10          # 呼吸循环帧数
+IDLE_INTERVAL = 220       # 呼吸每帧间隔(ms)，约 2.2s 一个呼吸周期
+SQUASH_INTERVAL = 45      # 点击挤压每帧间隔(ms)
+PAD_X = 24                # 帧画布左右留白（容纳挤压变宽与呼吸）
+PAD_TOP = 8               # 帧画布顶部留白
+SHADOW_H_RATIO = 0.16     # 阴影高度占人物高度比例
 
-def make_pet_image(img, size):
-    """把任意图片处理成圆角、柔化边缘的浮动桌宠图标。
 
-    对 JPG 等无透明通道的图片：居中裁切为正方形、加圆角矩形遮罩、
-    边缘羽化，避免出现生硬的矩形图片块。
+def _has_alpha(img):
+    """判断图片是否带透明通道。"""
+    if img.mode in ('RGBA', 'LA'):
+        return True
+    if img.mode == 'P' and 'transparency' in img.info:
+        return True
+    return False
+
+
+def _prepare_pet(img, pet_h):
+    """把原始图标转成基准人物 RGBA（高度=pet_h）。
+
+    透明图：等比缩放保留人物轮廓；无透明图：居中裁正方形 + 圆角兜底。
     """
-    # 居中裁切成正方形
+    if _has_alpha(img):
+        w, h = img.size
+        pet_w = max(1, round(pet_h * w / h))
+        return img.convert('RGBA').resize((pet_w, pet_h), Image.LANCZOS)
+    # 无透明通道：沿用旧的圆角处理，避免生硬矩形
     w, h = img.size
     side = min(w, h)
     left = (w - side) // 2
     top = (h - side) // 2
-    img = img.crop((left, top, left + side, top + side))
-    img = img.resize((size, size), Image.LANCZOS)
-
-    # 圆角遮罩（RGBA），半径取约 1/4 尺寸
-    radius = max(8, int(size * 0.28))
-    mask = Image.new('L', (size, size), 0)
-    draw = ImageDraw.Draw(mask)
-    draw.rounded_rectangle([0, 0, size, size], radius=radius, fill=255)
-
-    # 边缘羽化：在遮罩上再叠加一圈渐变，让边没那么“硬”
-    mask = mask.filter(ImageFilter.GaussianBlur(size * 0.03))
-
-    out = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    img = img.crop((left, top, left + side, top + side)).convert('RGBA')
+    img = img.resize((pet_h, pet_h), Image.LANCZOS)
+    radius = max(8, int(pet_h * 0.28))
+    mask = Image.new('L', (pet_h, pet_h), 0)
+    d = ImageDraw.Draw(mask)
+    d.rounded_rectangle([0, 0, pet_h, pet_h], radius=radius, fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(pet_h * 0.03))
+    out = Image.new('RGBA', (pet_h, pet_h), (0, 0, 0, 0))
     out.paste(img, (0, 0), mask)
     return out
 
 
+def _make_shadow(pet_w, shadow_h, scale=1.0):
+    """生成柔和椭圆阴影（不透明灰色渐变，模拟 alpha 阴影）。
+
+    tkinter 的 transparentcolor 只抠纯色、不支持半透明，故阴影用多层同心
+    椭圆从内到外渐浅的灰色来模拟柔边，浅色桌面下边界自然。
+    """
+    sw = max(1, round(pet_w * scale))
+    sh = max(1, round(shadow_h * scale))
+    img = Image.new('RGBA', (sw, sh), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    layers = [
+        (0.40, (176, 176, 184, 255)),
+        (0.34, (188, 188, 196, 255)),
+        (0.28, (200, 200, 207, 255)),
+        (0.22, (212, 212, 218, 255)),
+        (0.16, (224, 224, 229, 255)),
+    ]
+    for r, col in layers:
+        d.ellipse([sw * (0.5 - r / 2), sh * 0.15,
+                   sw * (0.5 + r / 2), sh * 0.95], fill=col)
+    return img
+
+
+def _compose_frame(pet, shadow_scale, lift, squash=(1.0, 1.0)):
+    """合成一帧完整渲染图（RGBA）：人物 + 底部阴影。
+
+    pet          基准人物 RGBA
+    shadow_scale 阴影缩放系数（呼吸/拎起时变化）
+    lift         人物上浮像素
+    squash       (sx, sy) 挤压因子，用于点击回弹
+    """
+    pw, ph = pet.size
+    sx, sy = squash
+    nw = max(1, round(pw * sx))
+    nh = max(1, round(ph * sy))
+    p = pet.resize((nw, nh), Image.LANCZOS)
+
+    shadow_h = round(ph * SHADOW_H_RATIO)
+    shadow = _make_shadow(pw, shadow_h, shadow_scale)
+
+    W = pw + 2 * PAD_X
+    H = ph + PAD_TOP + shadow_h + 6
+
+    frame = Image.new('RGBA', (W, H), (0, 0, 0, 0))
+    sw, sh = shadow.size
+    frame.alpha_composite(shadow, ((W - sw) // 2, H - sh - 2))
+    px = (W - nw) // 2
+    py = PAD_TOP + (ph - nh) // 2 - lift
+    frame.alpha_composite(p, (px, py))
+    return frame
+
+
+def frame_to_photo(frame):
+    """把 RGBA 帧转成品红抠底的 PhotoImage（tkinter 可显示）。
+
+    二值化 alpha：>=128 保留前景色，<128 填品红，由窗口 transparentcolor 抠掉。
+    """
+    w, h = frame.size
+    base = Image.new('RGB', (w, h), TRANSPARENT_RGB)
+    fg = frame.convert('RGB')
+    mask = frame.getchannel('A').point(lambda a: 255 if a >= 128 else 0)
+    base.paste(fg, (0, 0), mask)
+    return ImageTk.PhotoImage(base)
+
+
 def _placeholder_icon():
     """生成一个简单的占位水母图标（RGBA），用于图片加载失败时兜底。"""
-    size = config.PET_SIZE
+    size = config.PET_HEIGHT
     img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
+    s = size / 120.0
     # 身体
-    d.ellipse([18, 12, 102, 78], fill=(255, 170, 190, 210))
-    d.ellipse([36, 26, 86, 66], fill=(255, 214, 224, 160))
+    d.ellipse([18 * s, 12 * s, 102 * s, 78 * s], fill=(255, 170, 190, 210))
+    d.ellipse([36 * s, 26 * s, 86 * s, 66 * s], fill=(255, 214, 224, 160))
     # 触须
     for t in range(5):
-        base_x = 30 + t * 14
+        base_x = (30 + t * 14) * s
         pts = []
         for step in range(0, 40):
-            y = 72 + step * 1.1
-            x = base_x + math.sin(step / 4.0 + t) * 6
+            y = (72 + step * 1.1) * s
+            x = base_x + math.sin(step / 4.0 + t) * 6 * s
             pts.append((x, y))
-        d.line(pts, fill=(255, 170, 190, 180), width=2)
+        d.line(pts, fill=(255, 170, 190, 180), width=max(1, int(2 * s)))
     return img
 
 
@@ -96,6 +178,16 @@ class PetApp:
         self._popup_after_ids = []
         # 开机自启动当前状态
         self._autostart_var = tk.BooleanVar(value=autostart.is_enabled())
+        # ---------- 动画状态 ----------
+        self._frame_w = None        # 帧画布宽度
+        self._frame_h = None        # 帧画布高度
+        self._idle_photos = []      # 呼吸循环帧
+        self._squash_photos = []    # 点击挤压帧
+        self._lift_photo = None     # 拖拽拎起帧
+        self._anim_mode = 'idle'    # idle / squash
+        self._anim_job = None       # 当前 after 任务 id
+        self._idle_idx = 0          # 呼吸帧游标
+        self._lifting = False       # 是否处于拖拽拎起态
         self._setup_window()
         self._load_icon()
 
@@ -105,7 +197,7 @@ class PetApp:
         self.root.attributes('-topmost', True)         # 始终置顶
         self.root.config(bg=TRANSPARENT)               # 背景设为透明色
         self.root.wm_attributes('-transparentcolor', TRANSPARENT)  # 抠掉该颜色
-        self.root.geometry(f'{config.PET_SIZE}x{config.PET_SIZE}+120+120')
+        # 尺寸依赖图标帧，在 _load_icon 里确定后再 apply
 
     # ---------- 图标 ----------
     def _load_icon(self):
@@ -114,18 +206,33 @@ class PetApp:
         if not icon_path or not os.path.exists(icon_path):
             icon_path = config.PET_ICON
         try:
-            img = Image.open(icon_path).convert('RGBA')
+            img = Image.open(icon_path)
         except Exception:
             # 图片损坏/路径错误：记录日志并回退到内置占位图标，不崩溃
             logger.exception('图标加载失败，回退到占位图：%s', icon_path)
             img = _placeholder_icon()
 
-        img = make_pet_image(img, config.PET_SIZE)
-        self._photo = ImageTk.PhotoImage(img)
+        # 基准人物（按高度缩放，透明图保留轮廓）
+        pet = _prepare_pet(img, config.PET_HEIGHT)
+
+        # 预生成动画帧
+        self._idle_photos = [
+            frame_to_photo(_compose_frame(pet, s, l)) for s, l in self._idle_pose()
+        ]
+        self._squash_photos = [
+            frame_to_photo(_compose_frame(pet, 1.0, 0, sq))
+            for sq in ((1.0, 1.0), (1.10, 0.88), (0.95, 1.06),
+                       (1.04, 0.96), (1.0, 1.0))
+        ]
+        self._lift_photo = frame_to_photo(_compose_frame(pet, 0.75, 6))
+
+        self._frame_w = self._idle_photos[0].width()
+        self._frame_h = self._idle_photos[0].height()
 
         if self._icon is not None:
             self._icon.destroy()
-        self._icon = tk.Label(self.root, image=self._photo, bg=TRANSPARENT, bd=0)
+        self._icon = tk.Label(self.root, image=self._idle_photos[0],
+                              bg=TRANSPARENT, bd=0)
         self._icon.pack(fill='both', expand=True)
 
         # 事件挂在图标上
@@ -133,6 +240,63 @@ class PetApp:
         self._icon.bind('<B1-Motion>', self._on_motion)
         self._icon.bind('<ButtonRelease-1>', self._on_release)
         self._icon.bind('<Button-3>', self._show_menu)
+
+        # 应用窗口尺寸（帧画布大小）并开始呼吸动画
+        self.root.geometry(f'{self._frame_w}x{self._frame_h}+120+120')
+        self._resume_idle()
+
+    def _idle_pose(self):
+        """呼吸循环的姿态序列：[(shadow_scale, lift), ...]。
+
+        吸气时人物上浮、阴影略小；呼气时人物下沉、阴影略大。
+        """
+        poses = []
+        for i in range(IDLE_FRAMES):
+            phase = 2 * math.pi * i / IDLE_FRAMES
+            lift = round(2.5 * (1 - math.cos(phase)))
+            shadow_scale = 0.90 + 0.10 * math.cos(phase)
+            poses.append((shadow_scale, lift))
+        return poses
+
+    # ---------- 动画 ----------
+    def _stop_anim(self):
+        """取消当前排队的动画 tick。"""
+        if self._anim_job is not None:
+            try:
+                self.root.after_cancel(self._anim_job)
+            except Exception:
+                pass
+            self._anim_job = None
+
+    def _resume_idle(self):
+        """回到呼吸循环。"""
+        self._anim_mode = 'idle'
+        self._idle_idx = 0
+        self._icon.configure(image=self._idle_photos[0])
+        self._animate_idle()
+
+    def _animate_idle(self):
+        if self._anim_mode != 'idle':
+            return
+        self._idle_idx = (self._idle_idx + 1) % len(self._idle_photos)
+        self._icon.configure(image=self._idle_photos[self._idle_idx])
+        self._anim_job = self.root.after(IDLE_INTERVAL, self._animate_idle)
+
+    def _play_squash(self):
+        """点击挤压回弹动画（squash & stretch）。"""
+        self._anim_mode = 'squash'
+        self._stop_anim()
+        idx = [0]
+
+        def step():
+            if idx[0] >= len(self._squash_photos):
+                self._resume_idle()
+                return
+            self._icon.configure(image=self._squash_photos[idx[0]])
+            idx[0] += 1
+            self._anim_job = self.root.after(SQUASH_INTERVAL, step)
+
+        step()
 
     # ---------- 拖拽 ----------
     def _on_press(self, e):
@@ -146,7 +310,12 @@ class PetApp:
         dx = e.x_root - self._press_origin[0]
         dy = e.y_root - self._press_origin[1]
         if abs(dx) > 3 or abs(dy) > 3:
-            self._moved = True
+            if not self._moved:
+                self._moved = True
+                # 拖拽开始：切换到拎起帧（阴影缩小、人物上浮）
+                self._lifting = True
+                self._stop_anim()
+                self._icon.configure(image=self._lift_photo)
         self.root.geometry(
             f'+{self._win_origin[0] + dx}+{self._win_origin[1] + dy}')
         # 让悬浮气泡跟随图标一起移动
@@ -160,8 +329,13 @@ class PetApp:
                 pass
 
     def _on_release(self, e):
-        # 按住未拖动视为"单击" → 显示/关闭气泡
+        # 拖拽结束：从拎起态落回呼吸
+        if self._lifting:
+            self._lifting = False
+            self._resume_idle()
+        # 按住未拖动视为"单击" → 挤压回弹 + 显示/关闭气泡
         if not self._moved:
+            self._play_squash()
             self._show_bubble()
         self._press_origin = None
 
@@ -295,10 +469,10 @@ class PetApp:
         h = max(h, 46)
         wrap_final = w - pad_x * 2
 
-        x = self.root.winfo_x() + config.PET_SIZE // 2 - w // 2
+        x = self.root.winfo_x() + self._frame_w // 2 - w // 2
         y = self.root.winfo_y() - h - 8
         if y < 0:
-            y = self.root.winfo_y() + config.PET_SIZE + 8
+            y = self.root.winfo_y() + self._frame_h + 8
 
         bubble = tk.Toplevel(self.root)
         bubble.overrideredirect(True)
@@ -494,6 +668,8 @@ class PetApp:
         menu.add_command(label='最近 7 天', command=lambda: self._show_table(7))
         menu.add_command(label='历史所有', command=lambda: self._show_table(None))
         menu.add_separator()
+        menu.add_command(label='键盘热力图', command=self._show_heatmap)
+        menu.add_separator()
         menu.add_command(label='更换图标', command=self._change_icon)
         # 开机自启动开关（勾选表示已开启）
         menu.add_checkbutton(
@@ -517,6 +693,236 @@ class PetApp:
     def _toast(self, msg):
         """在桌宠上方短暂显示一条提示。"""
         self._popup(body=msg, duration=2200)
+
+    def _show_heatmap(self):
+        """弹出 26 键键盘热力图（深色 HUD 动态版）。
+
+        - 实时监听敲键：每敲一个键，对应键位立刻加深并播放环形扩散特效。
+        - 温度色阶：绿→黄→橙→红（低频到最热），图例用英文 COOL/ACTIVE/HOT/PEAK。
+        - 按键回调在监听线程触发，通过 root.after 调度回主线程绘制。
+        """
+        # 热力图按键布局：三行 QWERTY。None 表示该列空白（占位）。
+        layout = [
+            ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+            ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', None],
+            ['z', 'x', 'c', 'v', 'b', 'n', 'm', None, None, None],
+        ]
+
+        # 初始计数快照
+        key_counts = self.manager.snapshot_keys()
+        counts = {k: key_counts.get(k, 0) for row in layout
+                  for k in row if k}
+
+        top = tk.Toplevel(self.root)
+        top.title('键盘热力图')
+        top.attributes('-topmost', True)
+        top.config(bg='#0a0f1e')
+        top.resizable(False, False)
+
+        # ---------- 顶部 HUD ----------
+        header = tk.Frame(top, bg='#0a0f1e')
+        header.pack(fill='x', padx=16, pady=(12, 2))
+        tk.Label(
+            header, text='KEYBOARD HEATMAP',
+            font=('Consolas', 11, 'bold'), fg='#5b7db1', bg='#0a0f1e',
+        ).pack(side='left')
+        tk.Label(
+            header, text='LIVE', fg='#22d3ee', bg='#0a0f1e',
+            font=('Consolas', 10, 'bold'),
+        ).pack(side='right')
+
+        stats = tk.Frame(top, bg='#0a0f1e')
+        stats.pack(fill='x', padx=16, pady=(2, 6))
+        tk.Label(
+            stats, text=f"今天 {self.manager.current_count()} 次", fg='#e5e7eb',
+            bg='#0a0f1e', font=('Microsoft YaHei UI', 11, 'bold'),
+        ).pack(side='left')
+        top_key = max(counts, key=counts.get) if counts else '-'
+        top_key_label = tk.Label(
+            stats, text=f'HOT KEY {top_key}', fg='#ef4444',
+            bg='#0a0f1e', font=('Consolas', 11, 'bold'),
+        )
+        top_key_label.pack(side='right')
+
+        # ---------- 棋盘 canvas ----------
+        canvas = tk.Canvas(top, bg='#0a0f1e', highlightthickness=0, bd=0,
+                          width=320, height=130)
+        canvas.pack(padx=16, pady=4)
+
+        # ---------- 图例（英文）----------
+        legend = tk.Frame(top, bg='#0a0f1e')
+        legend.pack(fill='x', padx=16, pady=(6, 6))
+        for label, color in [('COOL', '#4ade80'), ('ACTIVE', '#facc15'),
+                             ('HOT', '#fb923c'), ('PEAK', '#ef4444')]:
+            sw = tk.Label(legend, text=label, fg='#7dd3fc', bg='#0a0f1e',
+                          font=('Consolas', 9, 'bold'))
+            sw.pack(side='left', padx=(0, 14))
+            c = tk.Canvas(legend, width=12, height=12, bg='#0a0f1e',
+                          highlightthickness=0, bd=0)
+            c.pack(side='left', padx=(0, 4))
+            c.create_rectangle(1, 1, 12, 12, fill=color, outline='')
+
+        # ---------- 布局几何（键位坐标）----------
+        key_w, key_h, gap = 20, 18, 4
+        row_w = 10 * key_w + 9 * gap
+        indents = [0, 4, 26]
+        res = canvas.winfo_width(), canvas.winfo_height()
+        cw = res[0] if res[0] > 1 else 320
+        ch = res[1] if res[1] > 1 else 130
+        start_x = (cw - row_w) // 2
+        start_y = 6
+        # 每键的矩形坐标存起来，供高亮/特效定位
+        cell_rects = {}   # key -> (x1,y1,x2,y2)
+        for ridx, row in enumerate(layout):
+            y = start_y + ridx * (key_h + gap)
+            x = start_x + indents[ridx]
+            for cidx, k in enumerate(row):
+                if k is None:
+                    continue
+                x1 = x + cidx * (key_w + gap)
+                y1 = y
+                cell_rects[k] = (x1, y1, x1 + key_w, y1 + key_h)
+
+        # ---------- 热度色阶 ----------
+        def _ramp(ratio):
+            if ratio >= 0.86:
+                return '#ef4444'
+            if ratio >= 0.62:
+                return '#fb923c'
+            if ratio >= 0.36:
+                return '#facc15'
+            if ratio >= 0.12:
+                return '#4ade80'
+            return '#166534'
+
+        def _refresh_counts():
+            """重新读取最新计数并更新 counts 字典。"""
+            kc = self.manager.snapshot_keys()
+            counts.clear()
+            counts.update({k: kc.get(k, 0) for row in layout for k in row if k})
+
+        def _cur_max():
+            """当前 26 键的最大计数（做颜色归一化）。"""
+            return max(counts.values()) if counts else 0
+
+        # ---------- 绘制键位基线 ----------
+        def _draw_base():
+            canvas.delete('all')
+            canvas.update_idletasks()
+            # 点阵背景（用 canvas 实际尺寸，避免超出区域浪费）
+            bgw = canvas.winfo_width()
+            bgh = canvas.winfo_height()
+            if bgw <= 1:
+                bgw = 320
+            if bgh <= 1:
+                bgh = 130
+            for gx in range(0, bgw, 15):
+                for gy in range(0, bgh, 15):
+                    canvas.create_rectangle(gx, gy, gx + 1, gy + 1,
+                                            fill='#1a2a44', outline='')
+            # 键位
+            mc = _cur_max()
+            for k, (x1, y1, x2, y2) in cell_rects.items():
+                cnt = counts.get(k, 0)
+                ratio = (cnt / mc) if mc else 0
+                color = _ramp(ratio)
+                canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline='')
+                canvas.create_text(
+                    (x1 + x2) // 2, (y1 + y2) // 2, text=k.upper(),
+                    fill='#0a0f1e', font=('Consolas', 8, 'bold'))
+            # 更新 HOT KEY 标签
+            if counts:
+                tk_top = max(counts, key=counts.get)
+                top_key_label.config(text=f'HOT KEY {tk_top}')
+
+        # ---------- 击键特效（环形扩散 + 亮度闪）----------
+        def _flash_key(k):
+            """给某个键一次「加深 + 环形扩散」特效（主线程调度）。"""
+            if not top.winfo_exists():
+                return
+            if k not in cell_rects:
+                return
+            x1, y1, x2, y2 = cell_rects[k]
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+            cnt = counts.get(k, 0)
+            mc = _cur_max()
+            ratio = (cnt / mc) if mc else 0
+            color = _ramp(ratio)
+            # 高亮该键（加深背景 + 亮色描边）
+            rid = canvas.create_rectangle(
+                x1, y1, x2, y2, fill=color, outline='#ffffff', width=2)
+            canvas.create_text((x1 + x2) // 2, (y1 + y2) // 2, text=k.upper(),
+                               fill='#ffffff', font=('Consolas', 8, 'bold'))
+            # 环形扩散：逐帧放大、淡出
+            def _ring(step):
+                r = 4 + step * 5
+                oid = canvas.create_oval(
+                    cx - r, cy - r, cx + r, cy + r,
+                    outline=color, width=2)
+                canvas.after(int(step * 40), lambda: canvas.delete(oid))
+
+            for s in range(1, 5):
+                canvas.after(int(s * 40), (lambda s=s: _ring(s)))
+            # 一段时间后移除高亮，回归基线
+            def _restore():
+                if top.winfo_exists():
+                    _draw_base()
+            canvas.after(400, _restore)
+
+        # ---------- 按键回调：监听线程触发，调度回主线程 ----------
+        def _on_key(name):
+            try:
+                # 只关心 26 个字母键（name 为小写单个字母）
+                if len(name) == 1 and name.isalpha():
+                    key = name.lower()
+                    if key in cell_rects:
+                        self.root.after(0, lambda k=key: _flash_key(k))
+            except Exception:
+                pass
+
+        self.manager.add_listener(_on_key)
+
+        # 启动时就画一次基线
+        _draw_base()
+
+        # 周期轮询：让计数缓慢变化的键位颜色随之更新（兜底）。
+        def _poll():
+            if not top.winfo_exists():
+                return
+            _refresh_counts()
+            _draw_base()
+            canvas.after(1000, _poll)
+
+        canvas.bind('<Configure>', lambda e: _draw_base())
+        top.update_idletasks()
+        _draw_base()
+        _poll()
+
+        # 窗口关闭时移除按键监听，避免残留回调访问已销毁的窗口/画布。
+        def _cleanup():
+            try:
+                self.manager.remove_listener(_on_key)
+            except Exception:
+                pass
+            try:
+                top.destroy()
+            except Exception:
+                pass
+        top.protocol('WM_DELETE_WINDOW', _cleanup)
+
+        # 窗口定位到桌宠旁
+        top.update_idletasks()
+        win_w = top.winfo_reqwidth()
+        win_h = top.winfo_reqheight()
+        px = self.root.winfo_x() + self._frame_w + 8
+        py = self.root.winfo_y()
+        sw = top.winfo_screenwidth()
+        sh = top.winfo_screenheight()
+        if px + win_w > sw:
+            px = self.root.winfo_x() - win_w - 8
+        px = max(0, min(px, sw - win_w))
+        py = max(0, min(py, sh - win_h))
+        top.geometry(f'+{int(px)}+{int(py)}')
 
     def _show_table(self, days):
         """以表格形式展示历史点击次数。
@@ -634,7 +1040,7 @@ class PetApp:
         top.update_idletasks()
         win_w = top.winfo_reqwidth()
         win_h = top.winfo_reqheight()
-        px = self.root.winfo_x() + config.PET_SIZE + 8
+        px = self.root.winfo_x() + self._frame_w + 8
         py = self.root.winfo_y()
         sw = top.winfo_screenwidth()
         sh = top.winfo_screenheight()
