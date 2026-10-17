@@ -54,11 +54,16 @@ config.json
 
 # 预览缩略图等生成物
 .preview_*.png
+*_preview.png
 
 # 探测/临时文件
 _probe.txt
 _compile_check.py
 _compile_ok.txt
+
+# 一次性工具脚本（抠图/预览生成，本地可复用，不入库）
+_cutout.py
+_frames_preview.py
 
 # ===================== 编辑器 / IDE / 系统 =====================
 .vscode/
@@ -70,6 +75,13 @@ _compile_ok.txt
 Thumbs.db
 desktop.ini
 
+# ===================== 桌宠图标（本地照片，含隐私） =====================
+# 图标是用户本地照片（含人物隐私），不随仓库提交；本地 assets/ 保留即可。
+assets/*.png
+assets/*.jpg
+assets/*.jpeg
+assets/*.gif
+assets/*.bmp
+
 # ===================== 说明 =====================
 # uv.lock / pyproject.toml / requirements.txt 建议提交，用于锁定与复现依赖，故不忽略。
-# assets/ 为桌宠图标资源，需要随仓库提交，故不忽略。
