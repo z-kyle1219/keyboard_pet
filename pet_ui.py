@@ -412,22 +412,38 @@ class PetApp:
         return img
 
     def _close_popup(self):
-        """关闭当前气泡并清理状态（取消延迟回调）。"""
+        """关闭当前气泡并清理状态（取消延迟回调）。
+
+        注意：Python 3.13+ 的 tkinter 在 after_cancel 时会 deletecommand，
+        而气泡的延迟回调又经 canvas 注册；随后递归 destroy 会对已删除的
+        命令再次 deletecommand，抛出 TclError 令销毁半途中断——画布已毁、
+        窗口本体仍映射在屏幕上，留下一个白色空框（且 _active_popup 已被
+        置 None，后续点击永远无法真正关掉它）。因此 destroy 抛 TclError
+        时兜底：在 Tcl 层直接销毁窗口本体，确保它从屏幕上消失。
+        """
         b = self._active_popup
         self._active_popup = None
         self._active_popup_canvas = None
         if b is None:
             return
-        try:
-            for aid in self._popup_after_ids:
-                try:
-                    b.after_cancel(aid)
-                except Exception:
-                    pass
-            b.destroy()
-        except Exception:
-            pass
+        for aid in list(self._popup_after_ids):
+            try:
+                b.after_cancel(aid)
+            except Exception:
+                pass
         self._popup_after_ids = []
+        try:
+            b.destroy()
+        except tk.TclError:
+            # destroy 半途中断的兜底：先藏起窗口，再于 Tcl 层销毁整个子树
+            try:
+                b.withdraw()
+            except Exception:
+                pass
+            try:
+                b.tk.call('destroy', b._w)
+            except Exception:
+                pass
 
     def _popup(self, body, wrap=240, duration=3000, mvps=None):
         """弹出一个自动适配内容的圆角气泡卡片。
