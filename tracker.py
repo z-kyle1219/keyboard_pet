@@ -38,6 +38,31 @@ class CountManager:
         # 若当天重启程序，从数据库恢复已记录次数，避免清零
         self._count = db.get_count(self._today)
         self._key_counts = db.get_key_counts(self._today)
+        # 订阅者：每次按键时收到 (key_name)，供热力图等实时响应。
+        self._listeners = []
+
+    def add_listener(self, fn):
+        """注册一个按键回调 fn(key_name)。
+
+        回调在监听线程内同步执行，因此应轻量、不阻塞、不吐异常
+        （异常会被捕获并记日志）。
+        """
+        with self._lock:
+            self._listeners.append(fn)
+
+    def remove_listener(self, fn):
+        """移除一个按键回调（热力图窗口关闭时调用）。"""
+        with self._lock:
+            if fn in self._listeners:
+                self._listeners.remove(fn)
+
+    def _notify(self, key_name):
+        """在锁外通知所有订阅者（避免持有锁时回调产生死锁/重入）。"""
+        for fn in list(self._listeners):
+            try:
+                fn(key_name)
+            except Exception:
+                logger.exception('按键回调异常')
 
     def increment(self, key=None):
         """键盘按下时 +1（监听线程调用），并累计该键的次数。
@@ -47,6 +72,7 @@ class CountManager:
         在 +1 前先做跨天前置检查：若日期已变，归档旧的一天再计数，
         避免依赖 midnight_loop 线程可能因休眠/挂起而漏滚动。
         """
+        notified_key = None
         with self._lock:
             now = datetime.now().strftime('%Y-%m-%d')
             if now != self._today:
@@ -67,6 +93,11 @@ class CountManager:
             if key is not None:
                 name = key_to_name(key)
                 self._key_counts[name] = self._key_counts.get(name, 0) + 1
+                notified_key = name
+
+        # 锁外通知订阅者（避免持有锁时回调导致重入/死锁）
+        if notified_key is not None:
+            self._notify(notified_key)
 
     def snapshot(self):
         """把当前计数与各键计数落库，并返回这同一时刻的计数（供界面一次性使用）。
@@ -81,6 +112,11 @@ class CountManager:
             except Exception:
                 logger.exception('快照落库失败')
             return self._count
+
+    def snapshot_keys(self):
+        """返回当前各键计数的副本（供热力图一次性读取，不落库）。"""
+        with self._lock:
+            return dict(self._key_counts)
 
     def current_count(self):
         with self._lock:
