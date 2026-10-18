@@ -14,8 +14,16 @@ keyboard_pet/
 ├── db.py                # SQLite 数据层（daily_stats 按天聚合 + daily_key_stats 按键明细）
 ├── tracker.py           # 计数核心：线程安全的当天计数 + 按键明细 + 跨天滚动
 ├── listener.py          # 全局键盘监听（pynput，仅键盘）
-├── scheduler.py         # 后台线程：24:00 跨天刷新 + 每 20s 落库
-├── pet_ui.py            # 桌宠界面：透明漂浮窗 + 左键气泡 + 右键菜单 + 图标处理
+├── scheduler.py         # 后台线程：24:00 跨天刷新 + 周期落库
+├── pet_ui/              # 桌宠界面包（原单文件 pet_ui.py 拆分而来）
+│   ├── __init__.py      # 对外导出 PetApp（导入方式保持不变）
+│   ├── theme.py         # 配色与渲染参数常量
+│   ├── renderer.py      # 图像流水线（Pillow：抠底/阴影/帧合成/占位图）
+│   ├── animations.py    # 呼吸 / 挤压回弹 / 拖拽拎起动画
+│   ├── popup.py         # 气泡卡片 + MVP 徽章 + 冠军登场特效
+│   ├── heatmap.py       # 键盘热力图窗口
+│   ├── table.py         # 历史表格（近 7 天 / 全部）
+│   └── app.py           # PetApp 主类：窗口 / 图标 / 拖拽 / 右键菜单
 │
 ├── assets/              # 资源目录
 │   ├── *.png             # 桌宠图标（优先带透明通道的 PNG，人物轮廓最佳）
@@ -43,7 +51,16 @@ keyboard_pet/
 | **tracker.py** | 计数核心 | 线程安全 `Lock`；累计各键次数；跨天归档；重启恢复当天数据 |
 | **listener.py** | 键盘监听 | `pynput.keyboard.Listener`；仅键盘（含修饰键），鼠标不计 |
 | **scheduler.py** | 定时任务 | `midnight_loop` 等 24:00 跨天滚动；`periodic_save` 每 20s 落库 |
-| **pet_ui.py** | 界面交互 | 透明漂浮窗（人物轮廓+阴影）、拖拽拎起、左键气泡（含 MVP 徽章）、右键表格（含 MVP 列）、呼吸/挤压动画 |
+| **pet_ui/app.py** | 界面主类 | 透明漂浮窗（人物轮廓+阴影）、拖拽拎起、右键菜单、更换图标、帧预生成 |
+| **pet_ui/renderer.py** | 图像渲染 | `_prepare_pet` / `_make_shadow` / `_compose_frame` / `frame_to_photo` / 占位图 |
+| **pet_ui/animations.py** | 动画 | 呼吸循环、点击挤压回弹、拖拽拎起状态机 |
+| **pet_ui/popup.py** | 气泡 | 自适应圆角卡片、MVP 徽章、冠军登场特效、气泡跟随与关闭兜底 |
+| **pet_ui/heatmap.py** | 热力图 | 26 键实时热度、环形扩散特效、HOT KEY 统计 |
+| **pet_ui/table.py** | 历史表格 | `ttk.Treeview` 三列（日期/次数/MVP 键）、隔行变色 |
+| **pet_ui/theme.py** | 常量 | 配色、DPI 与动画参数集中管理 |
+
+> 拆分后各模块通过 Mixin 混入 `PetApp`（`AnimationMixin` / `PopupMixin` / `HeatmapMixin` / `TableMixin`），
+> `main.py` 的 `from pet_ui import PetApp` 无需任何改动，UI 行为与拆分前完全一致。
 
 ## 三、数据模型
 

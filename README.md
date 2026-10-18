@@ -49,8 +49,15 @@ config.py        配置与路径（find_icon 自动扫描 assets/ 图标）
 db.py            SQLite 按天聚合（含近7天 / 全部历史查询）
 listener.py      全局键盘监听
 tracker.py       线程安全计数 + 跨天滚动
-scheduler.py     24:00 刷新 + 每 60s 落库
-pet_ui.py        透明漂浮窗 + 左键气泡 + 右键表格 + 圆角处理
+scheduler.py     24:00 刷新 + 每 20s 落库
+pet_ui/          界面包（拆分自原单文件）
+  ├ app.py         PetApp 主类：窗口/图标/拖拽/菜单
+  ├ renderer.py    图像流水线（Pillow）
+  ├ animations.py  呼吸/挤压/拎起动画
+  ├ popup.py       气泡 + MVP 徽章特效
+  ├ heatmap.py     键盘热力图
+  ├ table.py       历史表格
+  └ theme.py       配色与参数常量
 assets/          桌宠图标（自动取第一张图片）
 ```
 完整说明见 `PROJECT_STRUCTURE.md`。
