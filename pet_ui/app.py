@@ -29,11 +29,12 @@ from pet_ui.renderer import (
     _compose_frame,
     frame_to_photo,
 )
+from pet_ui.schedule import ScheduleMixin
 from pet_ui.table import TableMixin
 from pet_ui.theme import TRANSPARENT, TEXT_DARK
 
 
-class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin):
+class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin, ScheduleMixin):
     def __init__(self, root, manager):
         self.root = root
         self.manager = manager
@@ -58,6 +59,10 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin):
         self._anim_job = None       # 当前 after 任务 id
         self._idle_idx = 0          # 呼吸帧游标
         self._lifting = False       # 是否处于拖拽拎起态
+        # ---------- 日程表状态 ----------
+        self._badge_label = None    # 头顶「N 待办」角标 Label
+        self._badge_image = None    # 角标图片（防 GC）
+        self._schedule_win = None   # 日程窗口（防止叠加多个）
         self._setup_window()
         self._load_icon()
 
@@ -114,6 +119,8 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin):
         # 应用窗口尺寸（帧画布大小）并开始呼吸动画
         self.root.geometry(f'{self._frame_w}x{self._frame_h}+120+120')
         self._resume_idle()
+        # 在图标上叠加头顶角标（「N 待办」，临近截止变红）
+        self._setup_badge()
 
     # ---------- 拖拽 ----------
     def _on_press(self, e):
@@ -153,7 +160,8 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin):
         # 按住未拖动视为"单击" → 挤压回弹 + 显示/关闭气泡
         if not self._moved:
             self._play_squash()
-            self._show_bubble()
+            self._show_bubble()      # 上方：统计气泡（方案 A 分离式）
+            self._show_schedule()    # 下方：独立日程窗口
         self._press_origin = None
 
     # ---------- 右键菜单 ----------

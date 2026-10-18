@@ -11,6 +11,7 @@
     popup.py       气泡卡片 + MVP 徽章 + 冠军登场特效
     heatmap.py     键盘热力图
     table.py       历史表格
+    schedule.py    日程表（独立窗口 + 头顶角标）
     app.py         PetApp 主类（窗口 / 图标 / 拖拽 / 菜单）
 
 兼容层：拆分前的一些模块级符号（IDLE_FRAMES、_prepare_pet 等）
