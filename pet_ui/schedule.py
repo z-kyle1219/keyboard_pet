@@ -101,14 +101,28 @@ class ScheduleMixin:
         self._badge_label.place(x=x, y=y)
 
     def _setup_badge(self):
-        """在图标上叠加一个角标 Label（调用时机：图标加载完成后）。"""
+        """在图标上叠加一个角标 Label（调用时机：图标加载完成后）。
+
+        角标与图标是两个独立控件：Tk 的事件只发给指针下那个控件，
+        不会冒泡到父控件。若角标不绑定事件，点击落在它覆盖的区域
+        （宠物右上角）时会被它吞掉，表现为「有时左键点桌宠没反应」。
+        因此这里把与图标相同的拖拽/单击/右键处理函数也绑到角标上。
+        """
+        # 更换图标时会再次调用本方法，先清掉旧角标，
+        # 避免残留的旧 Label（未绑事件）继续遮住宠物右上角
+        old = getattr(self, '_badge_label', None)
+        if old is not None:
+            try:
+                old.destroy()
+            except Exception:
+                pass
         self._badge_label = tk.Label(
             self.root, text='', bg=TRANSPARENT, bd=0,
             image=None,
         )
-        # 角标不拦截鼠标事件，避免干扰拖拽/单击
-        self._badge_label.configure(
-            highlightthickness=0, takefocus=0)
+        self._badge_label.configure(highlightthickness=0, takefocus=0)
+        # 复用主窗口的事件处理函数，让角标区域同样可拖拽/单击/右键
+        self._bind_pet_events(self._badge_label)
         self._refresh_badge()
 
     # ---------- 日程窗口 ----------

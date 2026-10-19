@@ -110,11 +110,8 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin, ScheduleMixin
                               bg=TRANSPARENT, bd=0)
         self._icon.pack(fill='both', expand=True)
 
-        # 事件挂在图标上
-        self._icon.bind('<ButtonPress-1>', self._on_press)
-        self._icon.bind('<B1-Motion>', self._on_motion)
-        self._icon.bind('<ButtonRelease-1>', self._on_release)
-        self._icon.bind('<Button-3>', self._show_menu)
+        # 事件挂在图标上（角标在 schedule.py 里绑同一组处理函数）
+        self._bind_pet_events(self._icon)
 
         # 应用窗口尺寸（帧画布大小）并开始呼吸动画
         self.root.geometry(f'{self._frame_w}x{self._frame_h}+120+120')
@@ -157,12 +154,60 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin, ScheduleMixin
         if self._lifting:
             self._lifting = False
             self._resume_idle()
-        # 按住未拖动视为"单击" → 挤压回弹 + 显示/关闭气泡
+        # 按住未拖动视为"单击" → 挤压回弹 + 同步开关气泡与日程
         if not self._moved:
             self._play_squash()
-            self._show_bubble()      # 上方：统计气泡（方案 A 分离式）
-            self._show_schedule()    # 下方：独立日程窗口
+            self._toggle_panels()
         self._press_origin = None
+
+    # ---------- 事件绑定 ----------
+    def _bind_pet_events(self, widget):
+        """把拖拽/单击/右键事件绑到给定控件上。
+
+        桌宠图标与头顶角标是两个独立控件。Tk 的事件只发给指针下那个
+        控件、不会自动冒泡到父控件，若只在图标上绑定，点击落在角标
+        区域时会被角标吞掉，表现为「有时左键点桌宠没反应」。
+        故两处都绑定同一组处理函数。
+        """
+        widget.bind('<ButtonPress-1>', self._on_press)
+        widget.bind('<B1-Motion>', self._on_motion)
+        widget.bind('<ButtonRelease-1>', self._on_release)
+        widget.bind('<Button-3>', self._show_menu)
+
+    # ---------- 气泡 / 日程同步开关 ----------
+    def _panels_open(self):
+        """日程窗口或统计气泡是否有任一个正在显示。
+
+        作为「面板已展开」的统一判定：只要两者之一还开着，
+        下一次点击桌宠就应当把两者一起收起。
+        """
+        w = getattr(self, '_schedule_win', None)
+        try:
+            if w is not None and w.winfo_exists():
+                return True
+        except Exception:
+            pass
+        p = getattr(self, '_active_popup', None)
+        try:
+            return p is not None and p.winfo_exists()
+        except Exception:
+            return False
+
+    def _toggle_panels(self):
+        """左键单击：气泡与日程窗口同步开关。
+
+        未展开时两者一起出现；再次点击桌宠时两者一起关闭，
+        无需再手动点日程窗口的叉号。日程窗口的叉号仍可单独关闭它。
+        """
+        if self._panels_open():
+            self._on_schedule_close()   # 关日程窗口
+            self._close_popup()         # 关统计气泡
+        else:
+            # 气泡若已在显示则保留，避免被 _show_bubble 的 toggle 逻辑误关
+            if not (self._active_popup is not None
+                    and self._active_popup.winfo_exists()):
+                self._show_bubble()
+            self._show_schedule()
 
     # ---------- 右键菜单 ----------
     def _show_menu(self, e):
