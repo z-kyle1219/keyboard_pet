@@ -1,7 +1,12 @@
-"""气泡系统：自适应圆角卡片、MVP 徽章、冠军登场特效。
+"""气泡系统：鎏金国潮卡片（玄黑底 + 描金 + 朱红）、MVP 徽章、冠军登场特效。
 
-从原 pet_ui.py 原样迁移。作为 Mixin 混入 PetApp，
-self 语义保持不变，UI 表现与拆分前一致。
+2026-10-20 改版（方案 2 · 鎏金国潮 gold）：
+- 卡片由白底浅灰描边改为玄黑底 + 双层描金外框，配顶部烫金标题。
+- 冠军徽章改直角金/朱红块（与国潮风一致，不用圆角）。
+- 冠军登场特效的光环与放射闪光由品牌粉改为描金，避免与黑金卡打架。
+- 全套色值集中在 theme.py 的 BUBBLE_* 常量，便于整体换肤。
+
+作为 Mixin 混入 PetApp，self 语义保持不变。
 """
 import math
 import tkinter as tk
@@ -11,7 +16,20 @@ from PIL import Image, ImageDraw, ImageTk
 
 import db
 from logger import logger
-from pet_ui.theme import PRIMARY, TEXT_DARK
+from pet_ui.theme import (
+    BUBBLE_BG,
+    BUBBLE_BORDER,
+    BUBBLE_EDGE,
+    BUBBLE_GOLD,
+    BUBBLE_GOLD_DARK,
+    BUBBLE_GOLD_LIGHT,
+    BUBBLE_INNER,
+    BUBBLE_RED,
+    BUBBLE_TEXT,
+)
+
+# 顶部烫金标题（字间距用空格拉开，营造国潮排版）
+BUBBLE_TITLE = '◆  今 日 战 报  ◆'
 
 
 class PopupMixin:
@@ -80,13 +98,21 @@ class PopupMixin:
                 result.append(cur)
         return result
 
-    def _render_card(self, w, h, radius=16):
-        """绘制圆角白色卡片（浅灰描边，取代此前的粉色描边）。"""
+    def _render_card(self, w, h, radius=10):
+        """绘制玄黑圆角卡片 + 双层描金外框（鎏金国潮）。
+
+        - 外框：主金线（BUBBLE_BORDER）
+        - 内框：暗金细线（BUBBLE_INNER）内缩 3px，形成"双线画框"质感
+        """
         img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
         d.rounded_rectangle(
             [0, 0, w - 1, h - 1], radius=radius,
-            fill='white', outline=(229, 231, 235), width=1,
+            fill=BUBBLE_BG, outline=BUBBLE_BORDER, width=2,
+        )
+        d.rounded_rectangle(
+            [3, 3, w - 4, h - 4], radius=max(0, radius - 2),
+            outline=BUBBLE_INNER, width=1,
         )
         return img
 
@@ -96,7 +122,7 @@ class PopupMixin:
         注意：Python 3.13+ 的 tkinter 在 after_cancel 时会 deletecommand，
         而气泡的延迟回调又经 canvas 注册；随后递归 destroy 会对已删除的
         命令再次 deletecommand，抛出 TclError 令销毁半途中断——画布已毁、
-        窗口本体仍映射在屏幕上，留下一个白色空框（且 _active_popup 已被
+        窗口本体仍映射在屏幕上，留下一个空框（且 _active_popup 已被
         置 None，后续点击永远无法真正关掉它）。因此 destroy 抛 TclError
         时兜底：在 Tcl 层直接销毁窗口本体，确保它从屏幕上消失。
         """
@@ -125,43 +151,44 @@ class PopupMixin:
                 pass
 
     def _popup(self, body, wrap=240, duration=3000, mvps=None):
-        """弹出一个自动适配内容的圆角气泡卡片。
+        """弹出一个自动适配内容的鎏金国潮卡片。
 
-        设计要点：
-        - 依据文本测量结果自动计算宽高，保证内容装得下
-        - 去掉此前的粉色描边，改用极浅灰色勾勒，简洁干净
-        - 即时显示（无渐入延迟），点击气泡本身即可关闭
-        mvps 为冠军徽章列表，每项形如
-        {'label': '昨天', 'text': '...', 'display': 'e 612', 'animate': True}。
-        带 animate 的徽章（已揭晓）会播放「冠军登场」动画；
+        结构自上而下：烫金标题 → 冠军徽章区 → 描金分隔线 → 正文。
+        点击卡片本身即可关闭。mvps 为冠军徽章列表，每项形如
+        {'label': '昨天', 'display': 'e 612', 'animate': True}。
+        带 animate 的徽章（已揭晓）播放「冠军登场」动画；
         盲盒（今天）不播动画，显示「?」。
         """
-        # 若已有气泡在显示，先关掉，避免叠在一起
         if self._active_popup is not None and self._active_popup.winfo_exists():
             self._close_popup()
 
         font = tkfont.Font(family='Microsoft YaHei UI', size=11)
         lines = self._wrap_text(body, font, wrap)
         line_h = font.metrics('linespace')
-        pad_x, pad_y = 18, 14
+        pad_x, pad_y = 18, 16
 
-        # 每个冠军徽章占用高度 + 间距
+        # 版式高度：标题 + 徽章区 + 分隔线
+        title_h = 22
+        title_gap = 6
         badge_h = 30
         badge_gap = 8
         badge_len = len(mvps) if mvps else 0
         badges_h = badge_len * (badge_h + badge_gap)
+        divider_h = 21
 
         max_w = max((font.measure(l) for l in lines), default=wrap)
-        # 徽章文字用 tkfont 实测宽度（随 DPI 缩放），据此撑大气泡，
-        # 避免徽章椭圆被 w-40 截断后白字溢出到白色背景上"隐身"
         badge_font = tkfont.Font(family='Microsoft YaHei UI', size=12,
                                  weight='bold')
         badges_req = max(
             (badge_font.measure(m['display']) for m in (mvps or [])),
-            default=0) + 48  # 椭圆左右各留 24px 内边距
-        w = max(max_w + pad_x * 2, badges_req + 40, 200)
-        h = len(lines) * line_h + pad_y * 2 + badges_h
-        h = max(h, 46)
+            default=0) + 48
+        title_font = tkfont.Font(family='Microsoft YaHei UI', size=11,
+                                 weight='bold')
+        title_w = title_font.measure(BUBBLE_TITLE)
+        w = max(max_w + pad_x * 2, badges_req + 40, title_w + pad_x * 2, 200)
+        h = (pad_y + title_h + title_gap + badges_h + divider_h
+             + len(lines) * line_h + pad_y)
+        h = max(h, 60)
         wrap_final = w - pad_x * 2
 
         x = self.root.winfo_x() + self._frame_w // 2 - w // 2
@@ -173,19 +200,27 @@ class PopupMixin:
         bubble.overrideredirect(True)
         bubble.attributes('-topmost', True)
         bubble.attributes('-alpha', 1.0)
-        bubble.config(bg='white')
+        bubble.config(bg=BUBBLE_BG)
         bubble.geometry(f'{w}x{h}+{x}+{y}')
 
         card = self._render_card(w, h)
         card_tk = ImageTk.PhotoImage(card)
 
-        canvas = tk.Canvas(bubble, width=w, height=h, bg='white',
+        canvas = tk.Canvas(bubble, width=w, height=h, bg=BUBBLE_BG,
                            highlightthickness=0, bd=0)
         canvas.pack(fill='both', expand=True)
         canvas.create_image(0, 0, image=card_tk, anchor='nw')
 
-        # 顶部冠军徽章区（每个占一行，存下坐标与句柄供动画使用）
         y_cursor = pad_y
+        # 顶部烫金标题
+        canvas.create_text(
+            w // 2, y_cursor + title_h // 2, text=BUBBLE_TITLE,
+            fill=BUBBLE_GOLD, font=('Microsoft YaHei UI', 11, 'bold'),
+            anchor='c',
+        )
+        y_cursor += title_h + title_gap
+
+        # 冠军徽章区
         banner_meta = []
         for m in (mvps or []):
             cx, cy, geoms = self._draw_mvp_badge(
@@ -196,14 +231,25 @@ class PopupMixin:
             })
             y_cursor += badge_h + badge_gap
 
-        text_y = y_cursor
+        # 描金分隔线（中间短横，两端留白）
+        line_y = y_cursor + divider_h // 2
+        canvas.create_line(
+            pad_x + 20, line_y, w - pad_x - 20, line_y,
+            fill=BUBBLE_BORDER, width=1,
+        )
         canvas.create_text(
-            pad_x, text_y, text=body, fill=TEXT_DARK,
+            w // 2, line_y, text='◆', fill=BUBBLE_GOLD,
+            font=('Microsoft YaHei UI', 7), anchor='c',
+        )
+        y_cursor += divider_h
+
+        # 正文
+        canvas.create_text(
+            pad_x, y_cursor, text=body, fill=BUBBLE_TEXT,
             font=('Microsoft YaHei UI', 11), justify='center',
             width=wrap_final, anchor='nw',
         )
         canvas._card_img = card_tk
-        # 点击气泡本体可关闭
         canvas.bind('<Button-1>', lambda e: self._close_popup())
 
         self._active_popup = bubble
@@ -235,17 +281,14 @@ class PopupMixin:
     def _draw_mvp_badge(self, canvas, badge_text, w, y_top, animate=False):
         """在 y_top 处绘制一个冠军徽章，返回 (cx, cy, geoms)。
 
-        animate=True 表示已揭晓（粉色实心 + 白色文字）；
-        animate=False 表示盲盒（金色实心 + 深琥珀文字）。
-        geoms 形如 {'box': bid, 'txt': tid, 'x1':.., 'y1':.., 'x2':..,
-        'y2':.., 'cx':.., 'cy':.., 'bw':..}，供「摇摆登场」绝对定位。
+        国潮风用直角块（不用圆角）：
+        - animate=True（已揭晓）：朱红底 + 亮金字 + 描金边；
+        - animate=False（盲盒）：描金底 + 深褐字 + 稍深金边。
+        geoms 供「摇摆登场」绝对定位使用。
         """
         badge_h = 30
         cx = w // 2
         cy = y_top + badge_h // 2
-        # 用 tkfont 实测文字宽度（随系统 DPI 缩放），再加左右内边距，
-        # 替代原先 16*len+48 的粗略估算——高 DPI 下估算偏小，
-        # 会导致白色文字超出粉色底、与白色背景混在一起"隐身"
         badge_font = tkfont.Font(family='Microsoft YaHei UI', size=12,
                                  weight='bold')
         text_w = badge_font.measure(badge_text)
@@ -254,9 +297,14 @@ class PopupMixin:
         x2 = cx + badge_w / 2
         y1 = y_top
         y2 = y_top + badge_h
-        color = PRIMARY if animate else '#f0a92e'
-        text_color = 'white' if animate else '#5a3d00'
-        box = canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline='')
+
+        if animate:
+            fill, text_color, outline = BUBBLE_RED, BUBBLE_GOLD_LIGHT, BUBBLE_GOLD
+        else:
+            fill, text_color, outline = BUBBLE_GOLD, BUBBLE_GOLD_DARK, BUBBLE_EDGE
+
+        box = canvas.create_rectangle(x1, y1, x2, y2, fill=fill,
+                                      outline=outline, width=1)
         txt = canvas.create_text(cx, cy, text=badge_text, fill=text_color,
                                  font=('Microsoft YaHei UI', 12, 'bold'))
         geoms = {'box': box, 'txt': txt, 'x1': x1, 'y1': y1,
@@ -266,20 +314,16 @@ class PopupMixin:
     def _badge_enter_animation(self, canvas, cx, cy, geoms):
         """冠军登场：徽章摇摆登场（绝对定位、振幅衰减归位）+ 单圈扩散光环 + 放射闪光。
 
-        Canvas 逐帧重绘缩放文本易模糊，故「摇摆」用水平绝对位移模拟，
-        叠加向外扩散的光环与放射线，营造「冠军登场」的聚光效果。
-        特效元素统一打 'fx' 标签；且每画一个特效就把徽章（底条+文字）
-        重新提到最顶层，保证动画全程文字清晰可见；
-        动画结束后统一删除特效，只留干净的徽章。
+        光环与闪光统一改用描金色（国潮金），避免黑金卡上出现粉色光晕。
+        特效元素打 'fx' 标签；每画一个特效就把徽章重新提到最顶层，
+        保证动画全程文字清晰；动画结束后统一删除特效。
         """
         def _raise_badge():
-            # Canvas 中后创建的元素在上层，特效会盖住先画的徽章文字，
-            # 故每次画完特效后把徽章底条和文字重新提到最顶
             canvas.tag_raise(geoms['box'])
             canvas.tag_raise(geoms['txt'])
 
         try:
-            # 1) 双圈光环先后向外扩散：新圈出现时删除上一圈，只保留单圈扩散
+            # 1) 双圈光环先后向外扩散：新圈出现时删除上一圈，只保留单圈
             last_ring = {'a': None, 'b': None}
 
             def _ring(series, r, color, width):
@@ -293,15 +337,14 @@ class PopupMixin:
 
             for step in range(1, 8):
                 aid = canvas.after(int(step * 40), (
-                    lambda r=8 + step * 7: _ring('a', r, PRIMARY, 2)))
+                    lambda r=8 + step * 7: _ring('a', r, BUBBLE_GOLD, 2)))
                 self._popup_after_ids.append(aid)
             for step in range(1, 8):
                 aid = canvas.after(int(step * 40 + 160), (
-                    lambda r=6 + step * 6: _ring('b', r, '#ffb3c9', 1)))
+                    lambda r=6 + step * 6: _ring('b', r, BUBBLE_GOLD_LIGHT, 1)))
                 self._popup_after_ids.append(aid)
 
-            # 2) 放射闪光：8 条线从中心向外（逐帧变长 + 微转），
-            #    每帧先清除上一帧的线条，避免线条层层堆积
+            # 2) 放射闪光：8 条线从中心向外，逐帧变长 + 微转
             prev_lines = []
 
             def _flash(rr, st):
@@ -315,7 +358,7 @@ class PopupMixin:
                     x2 = cx + math.cos(ang) * rr
                     y2 = cy + math.sin(ang) * rr
                     lid = canvas.create_line(x1, y1, x2, y2,
-                                             fill=PRIMARY, width=1,
+                                             fill=BUBBLE_GOLD, width=1,
                                              tags='fx')
                     prev_lines.append(lid)
                 _raise_badge()
@@ -331,7 +374,6 @@ class PopupMixin:
             for step in range(0, 11):
                 off = math.sin(step * 0.9) * 7 * (1 - step / 10.0)
                 moves.append(off)
-            # 末尾确保回到原位
             moves.append(0)
             for i, off in enumerate(moves):
                 def _sw(off=off):
@@ -343,7 +385,7 @@ class PopupMixin:
                 aid = canvas.after(int(i * 45), _sw)
                 self._popup_after_ids.append(aid)
 
-            # 4) 动画全部结束后清除所有光环与闪光，露出干净的徽章文字
+            # 4) 动画结束后清除所有光环与闪光
             def _cleanup_fx():
                 canvas.delete('fx')
                 _raise_badge()
