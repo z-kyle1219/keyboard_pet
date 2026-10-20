@@ -33,6 +33,8 @@ class HeatmapMixin:
         top.attributes('-topmost', True)
         top.config(bg='#0a0f1e')
         top.resizable(False, False)
+        # 先藏后显：构建期间不映射，避免闪现默认浅色空壳
+        top.withdraw()
 
         # ---------- 顶部 HUD ----------
         header = tk.Frame(top, bg='#0a0f1e')
@@ -238,3 +240,5 @@ class HeatmapMixin:
         px = max(0, min(px, sw - win_w))
         py = max(0, min(py, sh - win_h))
         top.geometry(f'+{int(px)}+{int(py)}')
+        # 内容与位置就绪，一次性显示（消除闪现的浅色空窗）
+        top.deiconify()

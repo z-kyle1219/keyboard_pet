@@ -36,6 +36,8 @@ class TableMixin:
         top.attributes('-topmost', True)
         top.config(bg='white')
         top.resizable(False, False)
+        # 先藏后显：构建期间不映射，避免闪现默认浅色空壳
+        top.withdraw()
 
         # 顶部：今天次数 + 标题（黑白头部，不再用粉色）
         # 注意：不再用 pack_propagate(False)+固定高度，避免文字被裁切
@@ -138,3 +140,5 @@ class TableMixin:
         px = max(0, min(px, sw - win_w))
         py = max(0, min(py, sh - win_h))
         top.geometry(f'+{int(px)}+{int(py)}')
+        # 内容与位置就绪，一次性显示（消除闪现的浅色空窗）
+        top.deiconify()

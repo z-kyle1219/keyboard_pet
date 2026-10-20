@@ -197,6 +197,10 @@ class PopupMixin:
             y = self.root.winfo_y() + self._frame_h + 8
 
         bubble = tk.Toplevel(self.root)
+        # 先藏后显：先 withdraw，设好底色/无边框/位置，最后才 deiconify。
+        # 否则 overrideredirect 会让窗口在底色还没设好时就先映射，
+        # 闪出一下默认浅色底。
+        bubble.withdraw()
         bubble.overrideredirect(True)
         bubble.attributes('-topmost', True)
         bubble.attributes('-alpha', 1.0)
@@ -271,6 +275,9 @@ class PopupMixin:
                 pass
 
         self._popup_after_ids.append(bubble.after(duration, _fade_out))
+
+        # 卡片内容全部画好，再一次性显示（避免闪现浅色空窗）
+        bubble.deiconify()
 
         # 对已揭晓的冠军徽章播放「冠军登场」动画（含摇摆 + 光环 + 闪光）
         for bm in banner_meta:

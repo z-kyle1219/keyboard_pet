@@ -197,6 +197,9 @@ class ScheduleMixin:
         top.config(bg=UI_BG)
         top.resizable(False, False)
         top.protocol('WM_DELETE_WINDOW', self._on_schedule_close)
+        # 先藏后显：构建期间不映射窗口，避免 Windows 先画出默认浅色
+        # 空壳（表现为点击桌宠时闪一下白框）。全部就绪后再 deiconify。
+        top.withdraw()
 
         today = datetime.now()
         weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
@@ -304,7 +307,14 @@ class ScheduleMixin:
         py = max(0, min(py, sh - win_h))
         top.geometry(f'+{int(px)}+{int(py)}')
 
+        # 先把列表/进度都画好（内容就绪），再一次性显示窗口，
+        # 避免出现「先空窗、后填内容」的二次闪烁。
         self._refresh_schedule_list()
+        top.deiconify()
+        # 窗口此时才真正映射，进度条画布才拿到真实宽度：
+        # 只重画进度条（不动列表），避免行布局二次重排。
+        top.update_idletasks()
+        self._draw_progress(self._prog_done, self._prog_total)
         entry.focus_set()
 
     def _on_schedule_close(self):
@@ -330,6 +340,7 @@ class ScheduleMixin:
         visible = [r for r in rows if not r[3] or (r[4] and r[4][:10] == today)]
         total = len(visible)
         done = sum(1 for r in visible if r[3])
+        self._prog_done, self._prog_total = done, total
         self._prog_ring.config(text=f'{done}/{total}')
         self._draw_progress(done, total)
         self._prog_cap.config(text=f'已完成 {done} 项，还剩 {total - done} 项')
