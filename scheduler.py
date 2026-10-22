@@ -31,8 +31,10 @@ def periodic_save(manager):
 # 播报窗口：19:00 起，到 24:00 结束
 WEATHER_START_HOUR = 19
 WEATHER_END_HOUR = 24
-# 检查间隔（秒）：30 分钟
-WEATHER_INTERVAL = 30 * 60
+# 窗口内检查间隔（秒）：10 分钟（用于 B2 突变兜底，不再重复弹播报）
+WEATHER_INTERVAL = 10 * 60
+# 已确认后的突变检查间隔（秒）：1 小时
+WEATHER_MUTATION_INTERVAL = 60 * 60
 
 
 class WeatherState:
@@ -70,6 +72,7 @@ def _in_window(now):
 
 
 def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
+                 mutation_interval=WEATHER_MUTATION_INTERVAL,
                  sleep_fn=time.sleep, now_fn=datetime.now,
                  fetch_all=None, detect_change=None):
     """天气播报后台循环。
@@ -77,17 +80,18 @@ def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
     参数注入（便于测试与解耦）：
     - show: 播报回调 show(current, changes)，由主程序传入（内部 root.after 回主线程）
     - state: 共享确认状态（WeatherState），默认内部新建
-    - interval: 检查间隔秒数
+    - interval: 窗口内检查间隔秒数
+    - mutation_interval: 已确认后的突变检查间隔秒数
     - sleep_fn / now_fn: 时间函数，测试时可替换
     - fetch_all / detect_change: 天气函数，默认用 weather 模块的
 
-    逻辑：
+    逻辑（新模型：弹一次挂着 + B2 突变兜底）：
     1. 不在窗口内 → 只睡 60 秒轮询，不做任何请求
-    2. 在窗口内 → 每 interval 拉一次天气：
-       - 未确认 → 播报（没点「知道了」就每次检查都弹）
-       - 已确认 但检测到突变 → 也播报（兜底）
-       - 已确认 且无突变 → 静默
-    每天 0 点重置「已确认」状态。
+    2. 进入窗口且未确认 → 拉一次天气并播报（卡片会挂着，不自动消失）
+    3. 已确认后 → 不再重复播报，但每 mutation_interval 拉一次：
+       - 检测到突变 → 再播报一次（兜底）
+       - 无突变 → 静默
+    每天 0 点重置「已确认」状态；第二天进入窗口时用新卡片替换旧的。
     """
     if state is None:
         state = WeatherState()
@@ -98,10 +102,12 @@ def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
         detect_change = detect_change or weather_mod.detect_change
 
     last_weather = {}       # 上次天气快照，用于突变对比
+    shown_date = None       # 当天是否已弹过卡片（弹一次就挂着，不重复弹）
 
     from logger import logger as _logger
-    _logger.info('天气播报线程已启动（窗口 %d:00-%d:00，间隔 %d 秒）',
-                 WEATHER_START_HOUR, WEATHER_END_HOUR, interval)
+    _logger.info('天气播报线程已启动（窗口 %d:00-%d:00，检查 %d 秒，突变 %d 秒）',
+                 WEATHER_START_HOUR, WEATHER_END_HOUR, interval,
+                 mutation_interval)
 
     while True:
         try:
@@ -114,25 +120,37 @@ def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
                 sleep_fn(60)
                 continue
 
-            # 窗口内：拉天气
+            # 跨天：清空当天已弹标记（第二天用新卡片替换旧的）
+            if shown_date is not None and shown_date != today:
+                shown_date = None
+
+            confirmed = state.is_confirmed(today)
+
+            # 未确认 且 当天还没弹过 → 拉一次并播报（卡片挂着，不自动消失）
+            if not confirmed and shown_date != today:
+                current = fetch_all()
+                if current:
+                    _logger.info('天气播报（首次）：%s', list(current.keys()))
+                    show(current, [])
+                    last_weather = current
+                    shown_date = today
+                sleep_fn(interval)
+                continue
+
+            # 已确认 或 当天已弹过 → 低频检查突变（B2 兜底）
             current = fetch_all()
             if current:
-                # 判断是否有突变（对比上次快照）
                 changes = []
                 for name, w in current.items():
                     ch = detect_change(last_weather.get(name), w)
                     if ch:
                         changes.append(f"{name}：{'、'.join(ch)}")
-
-                # 未确认 → 播报；已确认但有突变 → 也播报（兜底）
-                if not state.is_confirmed(today) or changes:
-                    _logger.info('天气播报：%s（突变=%s）',
-                                 list(current.keys()), changes)
+                if changes:
+                    _logger.info('天气突变兜底播报：%s', changes)
                     show(current, changes)
-
+                    shown_date = today
                 last_weather = current
-
-            sleep_fn(interval)
+            sleep_fn(mutation_interval)
         except Exception:
             # 任何意外都记日志，绝不让天气线程静默死掉
             _logger.exception('天气播报循环异常（已忽略并继续）')
