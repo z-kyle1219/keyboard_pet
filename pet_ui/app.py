@@ -31,10 +31,12 @@ from pet_ui.renderer import (
 )
 from pet_ui.schedule import ScheduleMixin
 from pet_ui.table import TableMixin
+from pet_ui.weather_popup import WeatherMixin
 from pet_ui.theme import TRANSPARENT, TEXT_DARK
 
 
-class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin, ScheduleMixin):
+class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
+              ScheduleMixin, WeatherMixin):
     def __init__(self, root, manager):
         self.root = root
         self.manager = manager
@@ -63,6 +65,9 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin, ScheduleMixin
         self._badge_label = None    # 头顶「N 待办」角标 Label
         self._badge_image = None    # 角标图片（防 GC）
         self._schedule_win = None   # 日程窗口（防止叠加多个）
+        # ---------- 天气状态 ----------
+        self._weather_win = None    # 天气卡片窗口
+        self._weather_state = None  # 由 main.py 注入的 WeatherState
         self._setup_window()
         self._load_icon()
 

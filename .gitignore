@@ -55,11 +55,13 @@ config.json
 # 预览缩略图等生成物
 .preview_*.png
 *_preview.png
+_weather_preview.png
 
 # 探测/临时文件
 _probe.txt
 _compile_check.py
 _compile_ok.txt
+_test_*.py
 
 # 一次性工具脚本（抠图/预览生成，本地可复用，不入库）
 _cutout.py

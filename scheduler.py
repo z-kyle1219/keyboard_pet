@@ -1,4 +1,5 @@
-"""后台线程：负责 24:00 跨天刷新与周期性落库。"""
+"""后台线程：负责 24:00 跨天刷新、周期性落库、天气定时播报。"""
+import threading
 import time
 from datetime import datetime, timedelta
 
@@ -22,3 +23,106 @@ def periodic_save(manager):
     while True:
         time.sleep(20)
         manager.persist()
+
+
+# ============================================================
+# 天气播报线程
+# ============================================================
+# 播报窗口：19:00 起，到 24:00 结束
+WEATHER_START_HOUR = 19
+WEATHER_END_HOUR = 24
+# 检查间隔（秒）：30 分钟
+WEATHER_INTERVAL = 30 * 60
+
+
+class WeatherState:
+    """天气播报的共享状态（线程安全）。
+
+    confirmed_date：用户当天点过「知道了」的日期；None 表示未确认。
+    - 天气线程读 is_confirmed() 决定要不要再播
+    - 界面线程点「知道了」时调 confirm() 写入
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.confirmed_date = None
+
+    def confirm(self, date):
+        """标记某天已确认。"""
+        with self._lock:
+            self.confirmed_date = date
+
+    def is_confirmed(self, date):
+        """某天是否已确认。"""
+        with self._lock:
+            return self.confirmed_date == date
+
+    def reset_if_new_day(self, date):
+        """跨天时清空确认状态（0 点重置）。"""
+        with self._lock:
+            if self.confirmed_date is not None and self.confirmed_date != date:
+                self.confirmed_date = None
+
+
+def _in_window(now):
+    """判断当前时间是否在播报窗口内（19:00 <= now < 24:00）。"""
+    return WEATHER_START_HOUR <= now.hour < WEATHER_END_HOUR
+
+
+def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
+                 sleep_fn=time.sleep, now_fn=datetime.now,
+                 fetch_all=None, detect_change=None):
+    """天气播报后台循环。
+
+    参数注入（便于测试与解耦）：
+    - show: 播报回调 show(current, changes)，由主程序传入（内部 root.after 回主线程）
+    - state: 共享确认状态（WeatherState），默认内部新建
+    - interval: 检查间隔秒数
+    - sleep_fn / now_fn: 时间函数，测试时可替换
+    - fetch_all / detect_change: 天气函数，默认用 weather 模块的
+
+    逻辑：
+    1. 不在窗口内 → 只睡 60 秒轮询，不做任何请求
+    2. 在窗口内 → 每 interval 拉一次天气：
+       - 未确认 → 播报（没点「知道了」就每次检查都弹）
+       - 已确认 但检测到突变 → 也播报（兜底）
+       - 已确认 且无突变 → 静默
+    每天 0 点重置「已确认」状态。
+    """
+    if state is None:
+        state = WeatherState()
+    # 延迟导入，避免模块级循环依赖
+    if fetch_all is None or detect_change is None:
+        import weather as weather_mod
+        fetch_all = fetch_all or weather_mod.fetch_all
+        detect_change = detect_change or weather_mod.detect_change
+
+    last_weather = {}       # 上次天气快照，用于突变对比
+
+    while True:
+        now = now_fn()
+        today = now.strftime('%Y-%m-%d')
+        state.reset_if_new_day(today)   # 0 点重置
+
+        if not _in_window(now):
+            # 窗口外：睡 60 秒再看一次（避免长时间 sleep 导致跨天不准）
+            sleep_fn(60)
+            continue
+
+        # 窗口内：拉天气
+        current = fetch_all()
+        if current:
+            # 判断是否有突变（对比上次快照）
+            changes = []
+            for name, w in current.items():
+                ch = detect_change(last_weather.get(name), w)
+                if ch:
+                    changes.append(f"{name}：{'、'.join(ch)}")
+
+            # 未确认 → 播报；已确认但有突变 → 也播报（兜底）
+            if not state.is_confirmed(today) or changes:
+                show(current, changes)
+
+            last_weather = current
+
+        sleep_fn(interval)

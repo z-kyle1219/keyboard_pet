@@ -12,7 +12,7 @@ import tkinter as tk
 from tracker import CountManager
 from listener import KeyListener
 from pet_ui import PetApp
-from scheduler import midnight_loop, periodic_save
+from scheduler import midnight_loop, periodic_save, weather_loop, WeatherState
 from logger import logger
 
 
@@ -50,6 +50,20 @@ def main():
         manager.persist()
         root.destroy()
         sys.exit(1)
+
+    # 后台线程：天气播报
+    # show 在天气线程里被调用，必须用 root.after 甩回主线程再碰界面
+    weather_state = WeatherState()
+    app._weather_state = weather_state
+
+    def _show_weather(current, changes):
+        root.after(0, lambda: app.show_weather(current, changes))
+
+    threading.Thread(
+        target=weather_loop,
+        args=(_show_weather, weather_state),
+        daemon=True,
+    ).start()
 
     try:
         root.mainloop()
