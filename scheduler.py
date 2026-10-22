@@ -99,30 +99,41 @@ def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
 
     last_weather = {}       # 上次天气快照，用于突变对比
 
+    from logger import logger as _logger
+    _logger.info('天气播报线程已启动（窗口 %d:00-%d:00，间隔 %d 秒）',
+                 WEATHER_START_HOUR, WEATHER_END_HOUR, interval)
+
     while True:
-        now = now_fn()
-        today = now.strftime('%Y-%m-%d')
-        state.reset_if_new_day(today)   # 0 点重置
+        try:
+            now = now_fn()
+            today = now.strftime('%Y-%m-%d')
+            state.reset_if_new_day(today)   # 0 点重置
 
-        if not _in_window(now):
-            # 窗口外：睡 60 秒再看一次（避免长时间 sleep 导致跨天不准）
+            if not _in_window(now):
+                # 窗口外：睡 60 秒再看一次（避免长时间 sleep 导致跨天不准）
+                sleep_fn(60)
+                continue
+
+            # 窗口内：拉天气
+            current = fetch_all()
+            if current:
+                # 判断是否有突变（对比上次快照）
+                changes = []
+                for name, w in current.items():
+                    ch = detect_change(last_weather.get(name), w)
+                    if ch:
+                        changes.append(f"{name}：{'、'.join(ch)}")
+
+                # 未确认 → 播报；已确认但有突变 → 也播报（兜底）
+                if not state.is_confirmed(today) or changes:
+                    _logger.info('天气播报：%s（突变=%s）',
+                                 list(current.keys()), changes)
+                    show(current, changes)
+
+                last_weather = current
+
+            sleep_fn(interval)
+        except Exception:
+            # 任何意外都记日志，绝不让天气线程静默死掉
+            _logger.exception('天气播报循环异常（已忽略并继续）')
             sleep_fn(60)
-            continue
-
-        # 窗口内：拉天气
-        current = fetch_all()
-        if current:
-            # 判断是否有突变（对比上次快照）
-            changes = []
-            for name, w in current.items():
-                ch = detect_change(last_weather.get(name), w)
-                if ch:
-                    changes.append(f"{name}：{'、'.join(ch)}")
-
-            # 未确认 → 播报；已确认但有突变 → 也播报（兜底）
-            if not state.is_confirmed(today) or changes:
-                show(current, changes)
-
-            last_weather = current
-
-        sleep_fn(interval)

@@ -66,12 +66,13 @@ def fetch_weather(coord, timeout=TIMEOUT):
     coord: "经度,纬度"，如 "116.28,40.10"
     返回: {"text": "阴", "temp": 22, "wind_dir": "东南风", "wind_scale": "3"}
     """
-    url = f"{_api_base()}/v7/weather/now"
-    params = {"location": coord, "key": _api_key()}
     try:
+        url = f"{_api_base()}/v7/weather/now"
+        params = {"location": coord, "key": _api_key()}
         resp = requests.get(url, params=params, timeout=timeout)
         data = resp.json()
     except Exception:
+        # 配置缺失、网络失败等都在这里兜底，绝不抛给调用方
         logger.exception("天气请求失败 coord=%s", coord)
         return None
 

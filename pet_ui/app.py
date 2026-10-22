@@ -153,6 +153,9 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
                     f'+{nx}+{max(0, ny)}')
             except Exception:
                 pass
+        # 让天气卡片跟随桌宠（并保持置顶不被遮挡）
+        if getattr(self, '_weather_win', None) is not None:
+            self._place_weather_win()
 
     def _on_release(self, e):
         # 拖拽结束：从拎起态落回呼吸
