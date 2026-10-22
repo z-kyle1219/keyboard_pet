@@ -91,6 +91,33 @@ def _is_rain(text):
     return any(k in text for k in ("雨", "雪", "雷"))
 
 
+def _hour_of(item):
+    """从 fxTime "2026-10-23T14:00+08:00" 取小时整数。"""
+    try:
+        return int(item["fxTime"][11:13])
+    except Exception:
+        return None
+
+
+def _date_of(item):
+    """从 fxTime 取日期 "2026-10-23"。"""
+    try:
+        return item["fxTime"][:10]
+    except Exception:
+        return None
+
+
+def _pick_tomorrow_hourly(hourly, tomorrow_date):
+    """只保留**明天那一天**的逐小时数据。
+
+    这是关键：72h 数据从"现在"起算，会同时含今天/明天/后天，
+    不过滤就会把不同天的天气混在一起（导致"明天下一整天雨"的错觉）。
+    """
+    if not tomorrow_date:
+        return []
+    return [h for h in hourly if _date_of(h) == tomorrow_date]
+
+
 def _merge_periods(hourly, start_hour, end_hour, predicate):
     """把逐小时数据里满足 predicate 的连续时段合并。
 
@@ -102,10 +129,8 @@ def _merge_periods(hourly, start_hour, end_hour, predicate):
     cur = None
     prev_h = None
     for h in hourly:
-        # 解析 "2026-10-23T14:00+08:00"
-        try:
-            hh = int(h["fxTime"][11:13])
-        except Exception:
+        hh = _hour_of(h)
+        if hh is None:
             continue
         if not (start_hour <= hh < end_hour):
             prev_h = None   # 离开轴范围，打断连续性
@@ -227,10 +252,14 @@ def fetch_location(coord):
         }
 
     # 降雨时段 + 阴晴变化时段条
-    if hourly:
+    # 关键：只取**明天那一天**的逐小时数据（72h 会含今天/明天/后天）
+    tomorrow_date = (result.get("tomorrow") or {}).get("date")
+    day_hourly = _pick_tomorrow_hourly(hourly, tomorrow_date)
+    if day_hourly:
         result["periods"] = _merge_periods(
-            hourly, STRIP_START_HOUR, STRIP_END_HOUR, lambda h: _is_rain(h.get("text", "")))
-        result["strip"] = _text_ranges(hourly, STRIP_START_HOUR, STRIP_END_HOUR)
+            day_hourly, STRIP_START_HOUR, STRIP_END_HOUR,
+            lambda h: _is_rain(h.get("text", "")))
+        result["strip"] = _text_ranges(day_hourly, STRIP_START_HOUR, STRIP_END_HOUR)
 
     return result
 
