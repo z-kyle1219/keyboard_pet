@@ -29,7 +29,7 @@ def _run(timeline, weather_seq, confirm_after=None):
     calls = []
     state = {"i": 0}
     weather_iter = iter(weather_seq)
-    st = scheduler.WeatherState()
+    st = scheduler.WeatherState(persist=False)
 
     def fake_now():
         if state["i"] >= MAX_TICKS:

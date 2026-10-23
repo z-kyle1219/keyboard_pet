@@ -39,31 +39,83 @@ WEATHER_INTERVAL = 60 * 60
 WEATHER_MUTATION_INTERVAL = 60 * 60
 
 
-class WeatherState:
-    """天气播报的共享状态（线程安全）。
+# 持久化键：写入 db 的 app_state 表，重启后恢复
+_WEATHER_SHOWN_KEY = 'weather_last_shown'
+_WEATHER_CONFIRMED_KEY = 'weather_confirmed'
 
-    confirmed_date：用户当天点过「知道了」的日期；None 表示未确认。
-    - 天气线程读 is_confirmed() 决定要不要再播
-    - 界面线程点「知道了」时调 confirm() 写入
+
+class WeatherState:
+    """天气播报的共享状态（线程安全 + 跨重启持久化）。
+
+    两个日期字段（都按「当天」判定）：
+    - shown_date：今天是否已弹过卡片（首播或突变都算）。
+      持久化后，重启当次不再重复首播。
+    - confirmed_date：用户当天点过「知道了」的日期；None 表示未确认。
+    天气线程读 is_shown()/is_confirmed() 决定要不要播；
+    界面线程点「知道了」时调 confirm() 写入。
+
+    persist=False 时只存内存（单元测试用，避免碰真实数据库）。
     """
 
-    def __init__(self):
+    def __init__(self, persist=True):
         self._lock = threading.Lock()
+        self._persist = persist
+        self.shown_date = None
         self.confirmed_date = None
+        if persist:
+            self._load()
+
+    def _load(self):
+        """启动时从 SQLite 恢复上次的已弹/已确认日期。"""
+        try:
+            from db import get_state
+            self.shown_date = get_state(_WEATHER_SHOWN_KEY)
+            self.confirmed_date = get_state(_WEATHER_CONFIRMED_KEY)
+        except Exception:
+            self.shown_date = None
+            self.confirmed_date = None
+
+    def _save(self, key, value):
+        """持久化单个状态（失败只忽略，不拖垮程序）。"""
+        if not self._persist:
+            return
+        try:
+            from db import set_state
+            set_state(key, value)
+        except Exception:
+            pass
 
     def confirm(self, date):
         """标记某天已确认。"""
         with self._lock:
             self.confirmed_date = date
+        self._save(_WEATHER_CONFIRMED_KEY, date)
+
+    def mark_shown(self, date):
+        """标记某天已弹过卡片。"""
+        with self._lock:
+            self.shown_date = date
+        self._save(_WEATHER_SHOWN_KEY, date)
 
     def is_confirmed(self, date):
         """某天是否已确认。"""
         with self._lock:
             return self.confirmed_date == date
 
-    def reset_if_new_day(self, date):
-        """跨天时清空确认状态（0 点重置）。"""
+    def is_shown(self, date):
+        """某天是否已弹过卡片。"""
         with self._lock:
+            return self.shown_date == date
+
+    def reset_if_new_day(self, date):
+        """跨天时清空当天状态（0 点重置，仅内存）。
+
+        数据库里旧日期的值不必删除——is_shown/is_confirmed 用日期相等
+        判断，旧值对新一天天然不匹配，不会误判。
+        """
+        with self._lock:
+            if self.shown_date is not None and self.shown_date != date:
+                self.shown_date = None
             if self.confirmed_date is not None and self.confirmed_date != date:
                 self.confirmed_date = None
 
@@ -108,7 +160,6 @@ def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
         detect_change = detect_change or weather_mod.detect_change
 
     last_weather = {}       # 上次天气快照，用于突变对比
-    shown_date = None       # 当天是否已弹过卡片（弹一次就挂着，不重复弹）
 
     from logger import logger as _logger
     _logger.info('天气播报线程已启动（播报 %d:00，监控 %d:00-%d:00，间隔 %d 秒）',
@@ -126,21 +177,17 @@ def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
                 sleep_fn(60)
                 continue
 
-            # 跨天：清空当天已弹标记（第二天用新卡片替换旧的）
-            if shown_date is not None and shown_date != today:
-                shown_date = None
-
             confirmed = state.is_confirmed(today)
 
             # 到播报时间（19 点）且未确认、当天未弹 → 拉一次并播报
             if (_in_window(now) and not confirmed
-                    and shown_date != today):
+                    and not state.is_shown(today)):
                 current = fetch_all()
                 if current:
                     _logger.info('天气播报（首次）：%s', list(current.keys()))
                     show(current, [])
                     last_weather = current
-                    shown_date = today
+                    state.mark_shown(today)
                 sleep_fn(interval)
                 continue
 
@@ -155,7 +202,7 @@ def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
                 if changes:
                     _logger.info('天气突变提醒：%s', changes)
                     show(current, changes)
-                    shown_date = today
+                    state.mark_shown(today)
                 last_weather = current
             sleep_fn(mutation_interval)
         except Exception:

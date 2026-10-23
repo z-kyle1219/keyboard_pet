@@ -23,8 +23,37 @@ def _connect():
         'PRIMARY KEY (date, key)'
         ')'
     )
+    # 轻量键值状态表：存跨重启的运行状态（如天气播报的「已弹过/已确认」日期）。
+    conn.execute(
+        'CREATE TABLE IF NOT EXISTS app_state ('
+        'key TEXT PRIMARY KEY,'
+        'value TEXT NOT NULL'
+        ')'
+    )
     conn.commit()
     return conn
+
+
+def get_state(key, default=None):
+    """读取 app_state 表中的某个键；不存在返回 default。"""
+    conn = _connect()
+    row = conn.execute(
+        'SELECT value FROM app_state WHERE key = ?', (key,)
+    ).fetchone()
+    conn.close()
+    return row[0] if row else default
+
+
+def set_state(key, value):
+    """写入 app_state 表（upsert）。value 转成字符串保存。"""
+    conn = _connect()
+    conn.execute(
+        'INSERT INTO app_state(key, value) VALUES(?, ?) '
+        'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+        (key, str(value)),
+    )
+    conn.commit()
+    conn.close()
 
 
 def save_count(date_str, count):
