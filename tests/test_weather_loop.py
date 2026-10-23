@@ -10,7 +10,12 @@ import scheduler
 MAX_TICKS = 30
 
 
-class _Stop(Exception):
+class _Stop(BaseException):
+    """测试用的终止信号。
+
+    必须继承 BaseException（而非 Exception），否则会被 weather_loop
+    内部的 except Exception 吞掉，导致循环无法终止（死循环）。
+    """
     pass
 
 
@@ -69,13 +74,13 @@ def _w(text, temp):
 
 
 def test_outside_window_no_broadcast():
-    """窗口外（18 点）不播报。"""
-    calls = _run([(18, 0), (18, 1)], [_w("晴", 20), _w("晴", 20)])
+    """监控窗口外（10 点）不播报。"""
+    calls = _run([(10, 0), (10, 1)], [_w("晴", 20), _w("晴", 20)])
     assert len(calls) == 0
 
 
 def test_broadcast_once_only():
-    """未确认时进入窗口只弹一次（挂着，不重复弹）。"""
+    """未确认时到播报时间只弹一次（挂着，不重复弹）。"""
     calls = _run([(19, 0), (19, 10), (19, 20)], [_w("晴", 20)] * 3)
     assert len(calls) == 1
 
@@ -88,9 +93,18 @@ def test_no_repeat_after_confirm():
 
 
 def test_mutation_after_confirm_rebroadcast():
-    """已确认后阴晴变化 → 兜底再播。"""
+    """已确认后阴晴变化 → 再播。"""
     calls = _run([(19, 0), (19, 10), (19, 20)],
                  [_w("晴", 20), _w("晴", 20), _w("阴", 20)],
                  confirm_after=1)
     assert len(calls) == 2
+    assert calls[-1][1]
+
+
+def test_daytime_mutation_detected():
+    """白天（11–19）也检测突变：预报变化能触发提醒。"""
+    calls = _run([(12, 0), (13, 0), (14, 0)],
+                 [_w("晴", 20), _w("晴", 20), _w("阴", 20)])
+    # 12 点不播报（未到 19），13→14 检测到变化才播
+    assert len(calls) == 1
     assert calls[-1][1]

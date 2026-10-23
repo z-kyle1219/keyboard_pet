@@ -281,19 +281,37 @@ def detect_change(old, new):
     """对比上次与本次天气，返回突变描述列表；无突变返回空列表。
 
     old / new: 地点数据字典（含 now / tomorrow）
-    判定：实况阴晴文字变化，或实况气温骤降 >= TEMP_DROP_THRESHOLD
+    判定（实况 + 预报都看）：
+    - 实况阴晴文字变化
+    - 实况气温骤降 >= TEMP_DROP_THRESHOLD
+    - 明天预报阴晴变化（brief 不同）
+    - 明天白天/夜间预报温度骤降 >= TEMP_DROP_THRESHOLD
     """
     changes = []
     if not old or not new:
         return changes
-    o_now, n_now = old.get("now", {}), new.get("now", {})
 
+    o_now, n_now = old.get("now", {}), new.get("now", {})
+    o_tm, n_tm = old.get("tomorrow") or {}, new.get("tomorrow") or {}
+
+    # ---- 实况对比 ----
     if o_now.get("text") != n_now.get("text"):
-        changes.append(f"{o_now.get('text')}→{n_now.get('text')}")
+        changes.append(f"现在 {o_now.get('text')}→{n_now.get('text')}")
 
     drop = (o_now.get("temp", 0) or 0) - (n_now.get("temp", 0) or 0)
     if drop >= TEMP_DROP_THRESHOLD:
-        changes.append(f"气温降{drop}℃")
+        changes.append(f"现在气温降{drop}℃")
+
+    # ---- 明天预报对比（关键：预报变化也要提醒）----
+    o_brief, n_brief = o_tm.get("brief", ""), n_tm.get("brief", "")
+    if o_brief and n_brief and o_brief != n_brief:
+        changes.append(f"明天预报 {o_brief}→{n_brief}")
+
+    # 明天白天/夜间温度预报变化（降 >= 阈值）
+    for key, label in (("day_temp", "白天"), ("night_temp", "夜间")):
+        ov, nv = o_tm.get(key), n_tm.get(key)
+        if ov is not None and nv is not None and (ov - nv) >= TEMP_DROP_THRESHOLD:
+            changes.append(f"明天{label}预报降{ov - nv}℃")
 
     return changes
 

@@ -28,11 +28,13 @@ def periodic_save(manager):
 # ============================================================
 # 天气播报线程
 # ============================================================
-# 播报窗口：19:00 起，到 24:00 结束
+# 播报窗口：19:00 起，到 24:00 结束（主动弹卡片）
 WEATHER_START_HOUR = 19
 WEATHER_END_HOUR = 24
-# 窗口内检查间隔（秒）：10 分钟（用于 B2 突变兜底，不再重复弹播报）
-WEATHER_INTERVAL = 10 * 60
+# 突变监控窗口：11:00 起（白天也监控，及早发现预报变化）
+WEATHER_WATCH_START_HOUR = 11
+# 窗口内检查间隔（秒）：1 小时
+WEATHER_INTERVAL = 60 * 60
 # 已确认后的突变检查间隔（秒）：1 小时
 WEATHER_MUTATION_INTERVAL = 60 * 60
 
@@ -67,8 +69,13 @@ class WeatherState:
 
 
 def _in_window(now):
-    """判断当前时间是否在播报窗口内（19:00 <= now < 24:00）。"""
+    """是否在**播报**窗口内（19:00 <= now < 24:00）。"""
     return WEATHER_START_HOUR <= now.hour < WEATHER_END_HOUR
+
+
+def _in_watch(now):
+    """是否在**突变监控**窗口内（11:00 <= now < 24:00）。"""
+    return WEATHER_WATCH_START_HOUR <= now.hour < WEATHER_END_HOUR
 
 
 def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
@@ -85,12 +92,11 @@ def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
     - sleep_fn / now_fn: 时间函数，测试时可替换
     - fetch_all / detect_change: 天气函数，默认用 weather 模块的
 
-    逻辑（新模型：弹一次挂着 + B2 突变兜底）：
-    1. 不在窗口内 → 只睡 60 秒轮询，不做任何请求
-    2. 进入窗口且未确认 → 拉一次天气并播报（卡片会挂着，不自动消失）
-    3. 已确认后 → 不再重复播报，但每 mutation_interval 拉一次：
-       - 检测到突变 → 再播报一次（兜底）
-       - 无突变 → 静默
+    逻辑（新模型：弹一次挂着 + 全天候突变监控）：
+    1. 不在**监控窗口**（11–24）→ 只睡 60 秒轮询，不做任何请求
+    2. 在监控窗口：
+       - 未确认 且 当天还没弹过 且 已到播报时间（19 点）→ 拉一次并播报
+       - 否则 → 每小时拉一次，检测突变（含预报变化），有变才弹
     每天 0 点重置「已确认」状态；第二天进入窗口时用新卡片替换旧的。
     """
     if state is None:
@@ -105,9 +111,9 @@ def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
     shown_date = None       # 当天是否已弹过卡片（弹一次就挂着，不重复弹）
 
     from logger import logger as _logger
-    _logger.info('天气播报线程已启动（窗口 %d:00-%d:00，检查 %d 秒，突变 %d 秒）',
-                 WEATHER_START_HOUR, WEATHER_END_HOUR, interval,
-                 mutation_interval)
+    _logger.info('天气播报线程已启动（播报 %d:00，监控 %d:00-%d:00，间隔 %d 秒）',
+                 WEATHER_START_HOUR, WEATHER_WATCH_START_HOUR,
+                 WEATHER_END_HOUR, interval)
 
     while True:
         try:
@@ -115,8 +121,8 @@ def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
             today = now.strftime('%Y-%m-%d')
             state.reset_if_new_day(today)   # 0 点重置
 
-            if not _in_window(now):
-                # 窗口外：睡 60 秒再看一次（避免长时间 sleep 导致跨天不准）
+            if not _in_watch(now):
+                # 监控窗口外：睡 60 秒再看一次（避免长时间 sleep 导致跨天不准）
                 sleep_fn(60)
                 continue
 
@@ -126,8 +132,9 @@ def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
 
             confirmed = state.is_confirmed(today)
 
-            # 未确认 且 当天还没弹过 → 拉一次并播报（卡片挂着，不自动消失）
-            if not confirmed and shown_date != today:
+            # 到播报时间（19 点）且未确认、当天未弹 → 拉一次并播报
+            if (_in_window(now) and not confirmed
+                    and shown_date != today):
                 current = fetch_all()
                 if current:
                     _logger.info('天气播报（首次）：%s', list(current.keys()))
@@ -137,7 +144,7 @@ def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
                 sleep_fn(interval)
                 continue
 
-            # 已确认 或 当天已弹过 → 低频检查突变（B2 兜底）
+            # 其它情况（11–19 监控，或已确认/已弹）→ 每小时检查突变
             current = fetch_all()
             if current:
                 changes = []
@@ -146,7 +153,7 @@ def weather_loop(show, state=None, interval=WEATHER_INTERVAL,
                     if ch:
                         changes.append(f"{name}：{'、'.join(ch)}")
                 if changes:
-                    _logger.info('天气突变兜底播报：%s', changes)
+                    _logger.info('天气突变提醒：%s', changes)
                     show(current, changes)
                     shown_date = today
                 last_weather = current
