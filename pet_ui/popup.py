@@ -26,10 +26,29 @@ from pet_ui.theme import (
     BUBBLE_INNER,
     BUBBLE_RED,
     BUBBLE_TEXT,
+    TIP_BG,
+    TIP_BTN,
+    TIP_BTN_HOVER,
+    TIP_BTN_TEXT,
+    TIP_GRAD_FROM,
+    TIP_GRAD_TO,
+    TIP_RADIUS,
+    TIP_TEXT,
+    TRANSPARENT,
 )
 
 # 顶部烫金标题（字间距用空格拉开，营造国潮排版）
 BUBBLE_TITLE = '◆  今 日 战 报  ◆'
+
+# 关机提醒气泡文案与按钮
+SHUTDOWN_TIP = '宝宝记得电脑关机哦~'
+SHUTDOWN_BTN = '知道啦'
+
+
+def _hex_to_rgb(color):
+    """'#rrggbb' → (r, g, b) 整数三元组。"""
+    c = color.lstrip('#')
+    return int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
 
 
 class PopupMixin:
@@ -401,6 +420,130 @@ class PopupMixin:
             self._popup_after_ids.append(aid)
         except Exception:
             logger.exception('冠军登场动画失败')
+
+    def _render_tip_card(self, w, h, radius=TIP_RADIUS):
+        """关机提醒专用：粉→浅紫对角渐变圆角卡片（柔和精致）。
+
+        用 PIL 画一条左上到右下的线性渐变，再用圆角遮罩把四角抠掉，
+        避免依赖 Tk 不支持渐变。渐变失败时回退为纯色底，不影响使用。
+        """
+        img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+        try:
+            grad = Image.new('RGB', (w, h))
+            px = grad.load()
+            f = _hex_to_rgb(TIP_GRAD_FROM)
+            t = _hex_to_rgb(TIP_GRAD_TO)
+            denom = max(1, (w - 1) + (h - 1))
+            for yy in range(h):
+                for xx in range(w):
+                    r = (xx + yy) / denom
+                    px[xx, yy] = (
+                        int(f[0] + (t[0] - f[0]) * r),
+                        int(f[1] + (t[1] - f[1]) * r),
+                        int(f[2] + (t[2] - f[2]) * r),
+                    )
+            mask = Image.new('L', (w, h), 0)
+            ImageDraw.Draw(mask).rounded_rectangle(
+                [0, 0, w - 1, h - 1], radius=radius, fill=255,
+            )
+            img.paste(grad, (0, 0), mask)
+        except Exception:
+            logger.exception('渐变卡片绘制失败，回退纯色底')
+            ImageDraw.Draw(img).rounded_rectangle(
+                [0, 0, w - 1, h - 1], radius=radius, fill=TIP_BG,
+            )
+        return img
+
+    def _shutdown_prompt(self):
+        """右键「退出」时的关机提醒气泡：不自动关闭，点「知道啦」才退出。
+
+        与普通气泡不同：
+        - 不注册到 self._active_popup，因此点击桌宠不会把它误关掉，
+          必须由用户点按钮确认；
+        - 不设 duration，永不自动消失，避免提醒一闪而过；
+        - 记录到 self._shutdown_win，便于状态判断与防重复弹出。
+        """
+        # 已有一个在显示就不重复弹
+        if self._shutdown_win is not None and self._shutdown_win.winfo_exists():
+            return
+
+        font = tkfont.Font(family='Microsoft YaHei UI', size=11)
+        btn_font = tkfont.Font(family='Microsoft YaHei UI', size=11,
+                               weight='bold')
+        line_h = font.metrics('linespace')
+        pad_x, pad_y = 22, 18
+        gap = 14
+        btn_w = btn_font.measure(SHUTDOWN_BTN) + 40
+        btn_h = 30
+
+        w = max(font.measure(SHUTDOWN_TIP) + pad_x * 2,
+                btn_w + pad_x * 2, 210)
+        h = pad_y + line_h + gap + btn_h + pad_y
+
+        x = self.root.winfo_x() + self._frame_w // 2 - w // 2
+        y = self.root.winfo_y() - h - 8
+        if y < 0:
+            y = self.root.winfo_y() + self._frame_h + 8
+
+        bubble = tk.Toplevel(self.root)
+        bubble.withdraw()
+        bubble.overrideredirect(True)
+        bubble.attributes('-topmost', True)
+        # 用抠底色实现圆角镂空：圆角外透出桌面而非粉底
+        bubble.config(bg=TRANSPARENT)
+        bubble.wm_attributes('-transparentcolor', TRANSPARENT)
+        bubble.geometry(f'{w}x{h}+{x}+{y}')
+
+        card = self._render_tip_card(w, h)
+        card_tk = ImageTk.PhotoImage(card)
+        canvas = tk.Canvas(bubble, width=w, height=h, bg=TRANSPARENT,
+                           highlightthickness=0, bd=0)
+        canvas.pack(fill='both', expand=True)
+        canvas.create_image(0, 0, image=card_tk, anchor='nw')
+        canvas._card_img = card_tk
+
+        # 正文
+        canvas.create_text(
+            w // 2, pad_y + line_h // 2, text=SHUTDOWN_TIP,
+            fill=TIP_TEXT, font=('Microsoft YaHei UI', 11), anchor='c',
+        )
+
+        # 「知道啦」按钮（白底深粉字）
+        by1 = pad_y + line_h + gap
+        by2 = by1 + btn_h
+        bx1 = w // 2 - btn_w // 2
+        bx2 = w // 2 + btn_w // 2
+        btn_box = canvas.create_rectangle(
+            bx1, by1, bx2, by2, fill=TIP_BTN,
+            outline=TIP_BTN, width=1,
+        )
+        btn_txt = canvas.create_text(
+            w // 2, (by1 + by2) // 2, text=SHUTDOWN_BTN,
+            fill=TIP_BTN_TEXT, font=('Microsoft YaHei UI', 11, 'bold'),
+        )
+
+        def _confirm(_e=None):
+            # 关键：不能在本回调里直接 destroy 自己所属的 canvas 窗口，
+            # 否则 Tk 会中止绑定脚本，后面的 root.destroy() 根本执行不到
+            # （气泡消失了、程序却还活着，变成幽灵进程）。
+            # 用 after(0) 把退出推迟到当前事件回调返回之后再执行。
+            self._shutdown_win = None
+            self.root.after(0, self.root.destroy)
+
+        def _hover(_e):
+            canvas.itemconfig(btn_box, fill=TIP_BTN_HOVER,
+                              outline=TIP_BTN_HOVER)
+
+        def _unhover(_e):
+            canvas.itemconfig(btn_box, fill=TIP_BTN, outline=TIP_BTN)
+
+        for item in (btn_box, btn_txt):
+            canvas.tag_bind(item, '<Enter>', _hover)
+            canvas.tag_bind(item, '<Leave>', _unhover)
+            canvas.tag_bind(item, '<Button-1>', _confirm)
+
+        self._shutdown_win = bubble
+        bubble.deiconify()
 
     def _toast(self, msg):
         """在桌宠上方短暂显示一条提示。"""

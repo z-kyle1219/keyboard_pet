@@ -68,6 +68,8 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
         # ---------- 天气状态 ----------
         self._weather_win = None    # 天气卡片窗口
         self._weather_state = None  # 由 main.py 注入的 WeatherState
+        # ---------- 关机提醒 ----------
+        self._shutdown_win = None   # 关机提醒气泡（点「知道啦」才退出）
         self._setup_window()
         self._load_icon()
 
@@ -156,6 +158,16 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
         # 让天气卡片跟随桌宠（并保持置顶不被遮挡）
         if getattr(self, '_weather_win', None) is not None:
             self._place_weather_win()
+        # 让关机提醒气泡跟随桌宠
+        sw = getattr(self, '_shutdown_win', None)
+        if sw is not None:
+            try:
+                if sw.winfo_exists():
+                    sw.geometry(
+                        f'+{self.root.winfo_x() + self._frame_w // 2 - sw.winfo_width() // 2}'
+                        f'+{max(0, self.root.winfo_y() - sw.winfo_height() - 8)}')
+            except Exception:
+                pass
 
     def _on_release(self, e):
         # 拖拽结束：从拎起态落回呼吸
@@ -237,7 +249,7 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
             command=self._toggle_autostart,
         )
         menu.add_separator()
-        menu.add_command(label='退出', command=self.root.destroy)
+        menu.add_command(label='退出', command=self._shutdown_prompt)
         menu.tk_popup(e.x_root, e.y_root)
 
     def _toggle_autostart(self):
