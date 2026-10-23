@@ -84,6 +84,11 @@ def _load_font(size, bold=False):
             return ImageFont.load_default()
 
 
+def _has_precip(text):
+    """判断天气文字是否含降水（雨/雪/雷），与 weather._is_rain 保持一致。"""
+    return any(k in text for k in ("雨", "雪", "雷"))
+
+
 def _strip_color(text):
     """按时段文字取底色（雷/雪优先于雨，避免被误判）。"""
     if '雷' in text:
@@ -262,6 +267,11 @@ def _render_card(current, changes, scale=1.0):
             for ln in lines:
                 d.text((x, ty), ln, font=f_rain, fill=COL_RAIN_TEXT)
                 ty += line_h
+        elif _has_precip((data.get('tomorrow') or {}).get('brief', '')):
+            # 兜底：日报预报有雨，但逐小时还没标出具体时段 → 提示"待定"
+            ty = band_top - s(24)
+            d.text((x, ty), '明天有雨 · 时段待定', font=f_rain,
+                   fill=COL_RAIN_TEXT)
 
         strip = data.get('strip', [])
         if strip:

@@ -313,6 +313,17 @@ def detect_change(old, new):
         if ov is not None and nv is not None and (ov - nv) >= TEMP_DROP_THRESHOLD:
             changes.append(f"明天{label}预报降{ov - nv}℃")
 
+    # ---- 降雨时段：从"无具体时段"到"有具体时段" → 提醒一次 ----
+    # 日报已经预报有雨、但逐小时还没标出时间时，卡片会显示"时段待定"；
+    # 这里在逐小时补出具体时段的那一刻，作为一次"突变"再弹一次。
+    # 只做"无 → 有"的边界（时段左右挪动不反复提醒）。
+    o_periods = old.get("periods") or []
+    n_periods = new.get("periods") or []
+    if not o_periods and n_periods:
+        desc = "、".join(f"{p['start']}–{p['end']} {p.get('text', '')}"
+                        for p in n_periods)
+        changes.append(f"明天降雨时段已确定：{desc}")
+
     return changes
 
 
