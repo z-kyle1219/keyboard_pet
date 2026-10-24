@@ -8,6 +8,7 @@
 - PopupMixin      气泡卡片 / MVP 徽章 / 冠军登场特效
 - HeatmapMixin    键盘热力图
 - TableMixin      历史表格
+- MinimizeMixin   一键最小化
 
 对外接口保持 `from pet_ui import PetApp` 不变，UI 行为与拆分前一致。
 """
@@ -22,6 +23,7 @@ import config
 from logger import logger
 from pet_ui.animations import AnimationMixin
 from pet_ui.heatmap import HeatmapMixin
+from pet_ui.minimize import MinimizeMixin
 from pet_ui.popup import PopupMixin
 from pet_ui.renderer import (
     _placeholder_icon,
@@ -36,7 +38,7 @@ from pet_ui.theme import TRANSPARENT, TEXT_DARK
 
 
 class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
-              ScheduleMixin, WeatherMixin):
+              ScheduleMixin, WeatherMixin, MinimizeMixin):
     def __init__(self, root, manager):
         self.root = root
         self.manager = manager
@@ -239,6 +241,8 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
         menu.add_command(label='历史所有', command=lambda: self._show_table(None))
         menu.add_separator()
         menu.add_command(label='键盘热力图', command=self._show_heatmap)
+        menu.add_separator()
+        menu.add_command(label='一键最小化', command=self._minimize_all)
         menu.add_separator()
         menu.add_command(label='更换图标', command=self._change_icon)
         # 开机自启动开关（勾选表示已开启）

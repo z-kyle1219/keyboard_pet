@@ -13,6 +13,7 @@
     table.py       历史表格
     checkbox.py    自绘圆形勾选框（日程表用）
     schedule.py    日程表（独立窗口 + 头顶角标）
+    minimize.py    一键最小化（EnumWindows + SW_MINIMIZE）
     app.py         PetApp 主类（窗口 / 图标 / 拖拽 / 菜单）
 
 兼容层：拆分前的一些模块级符号（IDLE_FRAMES、_prepare_pet 等）
