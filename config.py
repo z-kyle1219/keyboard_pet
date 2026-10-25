@@ -1,16 +1,14 @@
-"""配置模块：集中管理路径与用户自定义项。
+"""配置模块：集中管理路径与资源发现。
 
 职责：
-- 定义项目目录、数据库、配置、资源目录路径
-- 使用用户手动上传到 assets/ 的图标
+- 定义项目目录、数据库、资源目录路径
+- 自动发现 assets/ 里的桌宠图标（换图只需替换该目录下的图片）
 """
 import os
-import json
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(BASE_DIR, 'assets')
 DB_PATH = os.path.join(BASE_DIR, 'keyboard_stats.db')
-CONFIG_PATH = os.path.join(BASE_DIR, 'config.json')
 
 # 桌宠显示高度（像素）。人物图标宽度按宽高比自适应；
 # 无透明通道的图标按正方形圆角兜底处理。
@@ -52,26 +50,3 @@ def find_icon():
 
 # 默认图标：assets/ 里自动发现的第一张图片
 PET_ICON = find_icon()
-
-_DEFAULTS = {
-    # 默认使用 assets/ 里自动发现的第一张图片
-    'icon_path': PET_ICON,
-}
-
-
-def load_config():
-    """读取配置，缺失字段用默认值补齐。"""
-    cfg = dict(_DEFAULTS)
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-                cfg.update(json.load(f))
-        except Exception:
-            pass
-    return cfg
-
-
-def save_config(cfg):
-    """保存配置到 config.json。"""
-    with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)

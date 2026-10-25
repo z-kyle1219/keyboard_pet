@@ -32,7 +32,6 @@ keyboard_pet/
 │   └── *.jpg             # 无透明图时兜底（圆角显示）
 │
 ├── keyboard_stats.db    # SQLite 数据库（运行时自动生成）
-├── config.json          # 用户配置（图标路径等，运行时自动生成）
 │
 ├── run.bat              # Windows 一键启动脚本
 ├── pyproject.toml       # uv 项目配置（依赖声明）
@@ -48,13 +47,13 @@ keyboard_pet/
 | **main.py** | 程序入口 | 串起监听、窗口、后台线程；全局 try/except 兜底 + 退出前落库 |
 | **autostart.py** | 开机自启动 | 「启动」文件夹写入 `KeyboardPet.vbs`，用 pythonw 无窗口启动 main.py；开启/关闭 |
 | **logger.py** | 日志 | 写入 `pet.log`（UTF-8）；配合各模块排查运行时问题 |
-| **config.py** | 路径与配置 | `find_icon()` 优先扫描 `assets/` 里带透明通道的 PNG（回退任意图片）；JSON 持久化 |
+| **config.py** | 路径与资源发现 | `find_icon()` 优先扫描 `assets/` 里带透明通道的 PNG（回退任意图片）；无配置文件，换图只需替换 `assets/` 图片 |
 | **db.py** | 数据存取 | `daily_stats` 按天聚合 + `daily_key_stats` 按键明细；提供 `get_daily_mvp` 冠军键查询 |
 | **db_todo.py** | 待办数据层 | `todo` 表（标题/截止/是否完成/完成时刻）；未完成轮换、勾掉留一天的查询逻辑 |
 | **tracker.py** | 计数核心 | 线程安全 `Lock`；累计各键次数；跨天归档；重启恢复当天数据 |
 | **listener.py** | 键盘监听 | `pynput.keyboard.Listener`；仅键盘（含修饰键），鼠标不计 |
 | **scheduler.py** | 定时任务 | `midnight_loop` 等 24:00 跨天滚动；`periodic_save` 每 20s 落库 |
-| **pet_ui/app.py** | 界面主类 | 透明漂浮窗（人物轮廓+阴影）、拖拽拎起、右键菜单、更换图标、帧预生成 |
+| **pet_ui/app.py** | 界面主类 | 透明漂浮窗（人物轮廓+阴影）、拖拽拎起、右键菜单、帧预生成 |
 | **pet_ui/renderer.py** | 图像渲染 | `_prepare_pet` / `_make_shadow` / `_compose_frame` / `frame_to_photo` / 占位图 |
 | **pet_ui/animations.py** | 动画 | 呼吸循环、点击挤压回弹、拖拽拎起状态机 |
 | **pet_ui/popup.py** | 气泡 | 自适应圆角卡片、MVP 徽章、冠军登场特效、气泡跟随与关闭兜底 |
@@ -114,7 +113,7 @@ CREATE INDEX idx_todo_due_at ON todo(due_at);
 ## 四、图标方案
 
 - **默认**：`find_icon()` 自动扫描 `assets/` 目录，优先选带透明通道的 PNG（人物轮廓最适合做桌宠），找不到透明图时回退到任意第一张图片（png/jpg/jpeg/gif/bmp）
-- **更换**：右键桌宠 → 更换图标，或直接替换 `assets/` 里的图片
+- **更换**：直接把图片放进/替换 `assets/` 目录，重启程序即可生效（无需改代码、无需改配置；多张图时按上述规则取一张）
 - **透明图处理**：`_prepare_pet()` 等比缩放到 `PET_HEIGHT` 高度，保留人物轮廓，`_compose_frame()` 在人物底部叠加柔和椭圆阴影
 - **无透明图兜底**：居中裁切 + 圆角遮罩 + 边缘羽化，避免矩形生硬
 - **立体互动动画**：呼吸（人物上浮+阴影缩放）、点击挤压回弹、拖拽拎起（阴影缩小+人物上浮）
@@ -141,7 +140,7 @@ python main.py
 | 头顶角标 | 常驻显示「N 待办」；存在临近截止（≤12h）的待办时由粉色变红 |
 | 右键 → 历史所有 | 弹出表格，展示全部历史记录（日期 | 次数 | MVP 键），按日期倒序（最近的排最前） |
 | 右键 → 键盘热力图 | 弹出 26 键实时热度面板 |
-| 右键 → 更换图标 | 上传自定义图片 |
+| 右键 → 一键最小化 | 最小化所有可见窗口回到桌面（不关闭） |
 | 右键 → 开机自启动 | 切换开关；勾选 = 开机自动常驻 |
 | 右键 → 退出 | 退出程序（自动落库） |
 

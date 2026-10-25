@@ -2,7 +2,7 @@
 
 拆分说明（2026-10-18）：
 本模块只保留「核心窗口与交互」——透明漂浮窗、图标加载与帧预生成、
-拖拽/单击/右键菜单、更换图标、自启动开关。
+拖拽/单击/右键菜单、自启动开关。
 其余职责由 Mixin 拆分到独立文件，通过多重继承组合：
 - AnimationMixin  呼吸 / 挤压 / 拎起动画
 - PopupMixin      气泡卡片 / MVP 徽章 / 冠军登场特效
@@ -12,9 +12,7 @@
 
 对外接口保持 `from pet_ui import PetApp` 不变，UI 行为与拆分前一致。
 """
-import os
 import tkinter as tk
-from tkinter import filedialog
 
 from PIL import Image
 
@@ -42,7 +40,6 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
     def __init__(self, root, manager):
         self.root = root
         self.manager = manager
-        self.config = config.load_config()
         self._press_origin = None
         self._moved = False
         self._icon = None
@@ -85,10 +82,8 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
 
     # ---------- 图标 ----------
     def _load_icon(self):
-        # 直接使用用户手动上传到 assets/ 的图标
-        icon_path = self.config.get('icon_path')
-        if not icon_path or not os.path.exists(icon_path):
-            icon_path = config.PET_ICON
+        # 图标直接取自 assets/：换图只需替换 assets/ 里的图片，重启后生效
+        icon_path = config.PET_ICON
         try:
             img = Image.open(icon_path)
         except Exception:
@@ -243,7 +238,6 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
         menu.add_separator()
         menu.add_command(label='一键最小化', command=self._minimize_all)
         menu.add_separator()
-        menu.add_command(label='更换图标', command=self._change_icon)
         # 开机自启动开关（勾选表示已开启）
         menu.add_checkbutton(
             label='开机自启动',
@@ -262,16 +256,3 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
         self._autostart_var.set(enabled)
         msg = '开机自启动已开启' if enabled else '开机自启动已关闭'
         self._toast(msg)
-
-    # ---------- 更换图标 ----------
-    def _change_icon(self):
-        path = filedialog.askopenfilename(
-            title='选择桌宠图标',
-            filetypes=[('图片文件', '*.png *.gif *.jpg *.jpeg *.bmp'),
-                       ('所有文件', '*.*')],
-        )
-        if not path:
-            return
-        self.config['icon_path'] = path
-        config.save_config(self.config)
-        self._load_icon()
