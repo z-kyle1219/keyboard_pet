@@ -9,6 +9,7 @@
 - HeatmapMixin    键盘热力图
 - TableMixin      历史表格
 - MinimizeMixin   一键最小化
+- VaultMixin      琥珀（密码存储：搜索 + 解密显示）
 
 对外接口保持 `from pet_ui import PetApp` 不变，UI 行为与拆分前一致。
 """
@@ -31,12 +32,13 @@ from pet_ui.renderer import (
 )
 from pet_ui.schedule import ScheduleMixin
 from pet_ui.table import TableMixin
+from pet_ui.vault_ui import VaultMixin
 from pet_ui.weather_popup import WeatherMixin
 from pet_ui.theme import TRANSPARENT, TEXT_DARK
 
 
 class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
-              ScheduleMixin, WeatherMixin, MinimizeMixin):
+              ScheduleMixin, WeatherMixin, MinimizeMixin, VaultMixin):
     def __init__(self, root, manager):
         self.root = root
         self.manager = manager
@@ -69,6 +71,10 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
         self._weather_state = None  # 由 main.py 注入的 WeatherState
         # ---------- 关机提醒 ----------
         self._shutdown_win = None   # 关机提醒气泡（点「知道啦」才退出）
+        # ---------- 琥珀（密码存储）----------
+        self._vault_win = None      # 琥珀搜索窗口
+        self._reveal_win = None     # 密码明文显示气泡（自动清屏）
+        self._reveal_after_ids = []
         self._setup_window()
         self._load_icon()
 
@@ -235,6 +241,8 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
         menu.add_command(label='历史所有', command=self._show_table)
         menu.add_separator()
         menu.add_command(label='键盘热力图', command=self._show_heatmap)
+        menu.add_separator()
+        menu.add_command(label='琥珀', command=self._show_vault)
         menu.add_separator()
         menu.add_command(label='一键最小化', command=self._minimize_all)
         menu.add_separator()
