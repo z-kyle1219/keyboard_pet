@@ -1,4 +1,4 @@
-"""历史表格：近 7 天 / 全部历史（日期 | 次数 | MVP 键）。
+"""历史表格：全部历史（日期 | 次数 | MVP 键，倒序）。
 
 从原 pet_ui.py 原样迁移为 Mixin。
 """
@@ -13,23 +13,20 @@ from pet_ui.theme import PRIMARY_DARK, TEXT_DARK, TEXT_MUTED
 class TableMixin:
     """提供 _show_table。"""
 
-    def _show_table(self, days):
-        """以表格形式展示历史点击次数。
+    def _show_table(self):
+        """以表格形式展示全部历史点击次数。
 
-        days: 7 表示近 7 天，None 表示全部历史。
-        使用 ttk.Treeview 渲染「日期 | 次数」两列表格。
+        只保留「历史所有」一档：查询本身按日期倒序（最近的排最前），
+        最近 7 天天然包含在最上面几行，无需再单独提供「最近 7 天」入口。
+        使用 ttk.Treeview 渲染「日期 | 次数 | MVP 键」三列表格。
         """
         # 打开表格前，先用同一个原子快照完成「写库 + 取值」，
         # 保证表头「今天」与表格里「今天」那一行是同一个数字，
         # 彻底消除实时值与快照之间的竞态偏差（含 60s 落库滞后）。
         today_count = self.manager.snapshot()
 
-        if days is None:
-            rows = db.get_daily_mvp()
-            title = '历史所有'
-        else:
-            rows = db.get_daily_mvp(days)
-            title = f'最近 {days} 天'
+        rows = db.get_daily_mvp()
+        title = '历史所有'
 
         top = tk.Toplevel(self.root)
         top.title(f'点击次数历史 — {title}')

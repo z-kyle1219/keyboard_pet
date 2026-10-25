@@ -128,27 +128,21 @@ def get_top_keys(date_str):
     return [(k, c) for k, c in letter_rows if c == maxc]
 
 
-def get_daily_mvp(days=None):
-    """返回 [(date, count, mvp_label)]，mvp_label 形如 'e ×612' 或 'a 等2键 ×540'。
+def get_daily_mvp():
+    """返回全部历史 [(date, count, mvp_label)]，按日期倒序（最近的在最前）。
 
+    mvp_label 形如 'e ×612' 或 'a 等2键 ×540'。
     冠军键仅从 26 个英文字母键里选出。
     以 daily_stats（日期+次数）为主表，保证历史数据不丢；
     再从 daily_key_stats 查该天字母冠军键，拼成「键 ×次数」字符串。
     盲盒：今天的行（尚未封存）MVP 显示「?」，不揭露实时写入的键；
     历史行显示真实冠军；无明细且非今天才显示 '-'。
-    days=None 表示全部历史，否则返回最近 n 天。
     供历史表格展示「日期 | 次数 | MVP键」。
     """
     conn = _connect()
-    if days is None:
-        rows = conn.execute(
-            'SELECT date, count FROM daily_stats ORDER BY date DESC'
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            'SELECT date, count FROM daily_stats ORDER BY date DESC LIMIT ?',
-            (days,),
-        ).fetchall()
+    rows = conn.execute(
+        'SELECT date, count FROM daily_stats ORDER BY date DESC'
+    ).fetchall()
     key_rows = conn.execute(
         'SELECT date, key, count FROM daily_key_stats'
     ).fetchall()

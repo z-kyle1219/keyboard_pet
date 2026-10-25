@@ -237,8 +237,7 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
                        font=('Microsoft YaHei UI', 10),
                        bg='white', fg=TEXT_DARK,
                        activebackground='#1f1f1f', activeforeground='white')
-        menu.add_command(label='最近 7 天', command=lambda: self._show_table(7))
-        menu.add_command(label='历史所有', command=lambda: self._show_table(None))
+        menu.add_command(label='历史所有', command=self._show_table)
         menu.add_separator()
         menu.add_command(label='键盘热力图', command=self._show_heatmap)
         menu.add_separator()
