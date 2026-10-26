@@ -6,12 +6,16 @@
 因此匹配不是数据库的精确查询，而是一个字符串打分问题：
 1. **归一化**：统一小写、去掉空格/连字符/下划线/点等分隔符，
    于是 GitHub / github / git-hub / Git_Hub 归一到同一形态。
-2. **多字段加权**：账号名、网址(含域名)、备注/别名各算一路，
+2. **多字段加权**：名称、网址(含域名)、备注/别名各算一路，
    取各自最高分。
 3. **包含优先 + 前缀优先**：完全相等最高，前缀命中次之，
    子串命中再次，保证“打一半就能搜到”。
-4. **别名命中**：别名（aliases）里的任一条命中都给分，
-   方便给 GitHub 挂上 gh / github.com 之类的关键词。
+4. **别名命中**：别名（aliases）里的任一条命中都给分。
+5. **单字不检索**：查询至少 2 个字符（MIN_QUERY_LEN）。
+   否则搜 Q/P 这种单字母会命中任何含该字母的字段（包括
+   网址里的 https、备注里的字），噪声极大。
+6. **网址匹配先去掉协议头**：不能拿 'https://...' 原串来比，
+   否则搜 p/s/t 会因为 'https' 而误命中。
 
 本模块只做“打分 + 排序”，不碰任何 UI / 数据库 / 加密。
 """
@@ -19,6 +23,10 @@ import re
 
 # 归一化时剔除的分隔符与噪声字符（含常见网址前后缀）
 _NOISE = re.compile(r'[\s\-_.·/@:;,#\[\]()（）【】]+')
+
+# 匹配的最小查询长度：1 个字符太容易误命中（任何含该字母的字段都会中），
+# 因此单字不检索，至少两个字符。
+MIN_QUERY_LEN = 2
 
 # 各路字段的权重（命中越靠前的字段，排序越优先）
 _W_NAME = 1.00
@@ -57,6 +65,13 @@ def extract_domain(url):
     return normalize(host)
 
 
+def _url_body(url):
+    """网址去掉协议头后的归一化串（不再含 'https'，避免用户搜 p/s/t 误中）。"""
+    if not url:
+        return ''
+    return normalize(re.sub(r'^[a-z]+://', '', url.strip()))
+
+
 def _score_one(needle, hay):
     """单个词对单个字段的打分（needle / hay 均已归一化）。
 
@@ -89,7 +104,8 @@ def score(query, row):
     别名列表里每条别名都参与比对，取最好的一条。
     """
     q = normalize(query)
-    if not q:
+    # 单字不检索：1 个字符会命中任何一个含该字母的字段，噪声太大
+    if len(q) < MIN_QUERY_LEN:
         return 0.0
 
     best = 0.0
@@ -99,9 +115,9 @@ def score(query, row):
 
     domain = extract_domain(row.get('url') or '')
     best = max(best, _score_one(q, domain) * _W_DOMAIN)
-    # 网址整串也参与（用户可能直接粘完整链接搜索）
-    url_norm = normalize(row.get('url'))
-    best = max(best, _score_one(q, url_norm) * _W_DOMAIN)
+    # 网址整串（去协议头）也参与，用户可能直接粘链接搜索；
+    # 注意：不能拿带 'https' 的原串来匹配，否则搜 p/s/t 会误中。
+    best = max(best, _score_one(q, _url_body(row.get('url'))) * _W_DOMAIN)
 
     for alias in (row.get('aliases') or []):
         best = max(best, _score_one(q, normalize(alias)) * _W_ALIAS)

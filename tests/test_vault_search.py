@@ -85,6 +85,24 @@ def test_search_empty_query():
     assert vs.search('', rows) == []
 
 
+def test_single_char_query_does_not_match():
+    """单字不检索：搜 Q/P 不应因为网址的 https 或备注里的字而误中。"""
+    row = {'id': 1, 'name': 'SSID梯子', 'url': 'https://qe.newssid.com/',
+           'aliases': [], 'note': ''}
+    assert vs.score('q', row) == 0.0
+    assert vs.score('p', row) == 0.0
+    assert vs.score('s', row) == 0.0
+
+
+def test_scheme_does_not_match_url_query():
+    """搜 https 里的 p/s/t 不应命中，但搜网址里的真内容可以。"""
+    row = {'id': 1, 'name': 'SSID梯子', 'url': 'https://qe.newssid.com/',
+           'aliases': [], 'note': ''}
+    assert vs.score('tp', row) == 0.0      # 只在 'https' 里出现
+    assert vs.score('qe', row) > 0         # 域名真内容
+    assert vs.score('newssid', row) > 0
+
+
 def test_search_limit():
     """limit 生效。"""
     rows = [{'id': i, 'name': f'git{i}', 'url': '', 'aliases': []}
