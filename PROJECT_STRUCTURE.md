@@ -54,7 +54,7 @@ keyboard_pet/
 | **config.py** | 路径与资源发现 | `find_icon()` 优先扫描 `assets/` 里带透明通道的 PNG（回退任意图片）；无配置文件，换图只需替换 `assets/` 图片 |
 | **db.py** | 数据存取 | `daily_stats` 按天聚合 + `daily_key_stats` 按键明细；提供 `get_daily_mvp` 冠军键查询 |
 | **db_todo.py** | 待办数据层 | `todo` 表（标题/截止/是否完成/完成时刻）；未完成轮换、勾掉留一天的查询逻辑 |
-| **db_vault.py** | 琥珀数据层 | `vault_accounts` 表；**只存取密文**，不负责加解密；aliases 逗号分隔 |
+| **db_vault.py** | 琥珀数据层 | `vault_accounts` 表；**只存取密文**，不负责加解密；名称/密码必填，网址/备注选填 |
 | **vault_crypto.py** | 琥珀加密 | Windows DPAPI（CryptProtectData）加密/解密；密钥由系统绑定当前账户，不落盘 |
 | **vault_search.py** | 模糊匹配 | 归一化（大小写/分隔符）+ 多字段加权打分；纯函数、无副作用，便于测试 |
 | **tracker.py** | 计数核心 | 线程安全 `Lock`；累计各键次数；跨天归档；重启恢复当天数据 |
@@ -67,7 +67,7 @@ keyboard_pet/
 | **pet_ui/heatmap.py** | 热力图 | 26 键实时热度、环形扩散特效、HOT KEY 统计 |
 | **pet_ui/table.py** | 历史表格 | `ttk.Treeview` 三列（日期/次数/MVP 键）、隔行变色；全部历史按日期倒序（最近的排最前） |
 | **pet_ui/schedule.py** | 日程表 | 独立日程窗口（卡片+勾选+进度条，第三列完整汉字日期时间）；头顶角标（临近截止变红） |
-| **pet_ui/vault_ui.py** | 琥珀界面 | 搜索窗口（**输入关键词才检索**、默认不铺条目名）、模糊匹配列表、双击/按钮解密显示、明文自动清屏 |
+| **pet_ui/vault_ui.py** | 琥珀界面 | 搜索窗口（**输入关键词才检索**、默认不铺条目名）、模糊匹配列表、双击/按钮解密显示、明文自动清屏、新增/编辑（密码留空即不改，密码框有小眼睛） |
 | **pet_ui/theme.py** | 常量 | 配色、DPI 与动画参数集中管理 |
 
 > 拆分后各模块通过 Mixin 混入 `PetApp`（`AnimationMixin` / `PopupMixin` / `HeatmapMixin` / `TableMixin` / `ScheduleMixin`），
@@ -123,16 +123,20 @@ CREATE INDEX idx_todo_due_at ON todo(due_at);
 ```sql
 CREATE TABLE vault_accounts (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    name         TEXT NOT NULL,   -- 条目名（如 'GitHub'），搜索主字段
-    url          TEXT,            -- 网址（域名参与搜索）
-    username     TEXT,            -- 账号名
-    password_enc TEXT NOT NULL,   -- 密码**密文**（DPAPI，见 vault_crypto），绝不存明文
-    aliases      TEXT,            -- 别名，逗号分隔（如 'gh,github.com'），参与搜索
-    note         TEXT,            -- 备注，低权重参与搜索
+    name         TEXT NOT NULL,   -- 条目名（如 'GitHub'），**必填**，搜索主字段
+    url          TEXT,            -- 网址，**选填**（域名参与搜索）
+    password_enc TEXT NOT NULL,   -- 密码**密文**（DPAPI，见 vault_crypto），**必填**，绝不存明文
+    username     TEXT,            -- 已弃用（保留列，前端不再录入）
+    aliases      TEXT,            -- 已弃用（保留列）
+    note         TEXT,            -- 备注，**选填**，低权重参与搜索
     created_at   TEXT DEFAULT (datetime('now','localtime')),
     updated_at   TEXT DEFAULT (datetime('now','localtime'))
 );
 ```
+
+字段口径（用户定稿）：**名称、密码必填；网址、备注选填**。
+`username` / `aliases` 两列保留在表里（不影响旧数据、无需迁移），
+但录入界面不再展示、不再写入，恒为空。
 
 功能流程（用户定稿）：
 ```
@@ -147,12 +151,19 @@ CREATE TABLE vault_accounts (
   **不写日志、不进异常消息**。
 - **模糊匹配（vault_search.py）**：不是精确查询。先归一化（统一小写、
   去掉空格/连字符/下划线/点等），于是 `GitHub` / `github` / `git-hub` 视为同一形态；
-  再对 名称 / 网址域名 / 别名 / 备注 多字段加权打分，完全相等 > 前缀 > 子串，
-  支持打半截、别名（如给 GitHub 挂 `gh`）、直接粘完整链接。
+  再对 名称 / 网址域名 / 备注 多字段加权打分，完全相等 > 前缀 > 子串，
+  支持打半截、直接粘完整链接。（账号/别名两路仍保留在打分函数里，
+  但因前端不再录入、恒为空，实际不参与。）
 - **显示与清屏（pet_ui/vault_ui.py）**：窗口为**搜索驱动**——默认不铺任何
   条目名，**必须输入关键词才检索**，避免把全部账号清单晾在屏幕上。
-  只有**选中并点击「显示密码」**（或双击行）时才解密；明文显示在只读框里，
-  倒计时（`REVEAL_SECONDS=12` 秒）后自动清空并关闭，避免明文久留在屏幕上。
+  只有**选中并点击「显示密码」**（或双击行）时才解密；气泡内**同时展示
+  名称 + 网址 + 备注 + 密码**（网址可一键打开、密码可一键复制）；
+  明文显示在只读框里，倒计时（`REVEAL_SECONDS=12` 秒）后自动清空并关闭，
+  避免明文久留在屏幕上。
+- **编辑（更新已有条目）**：选中条目 → 点「编辑」→ 名称/网址回填、
+  **密码框留空**（留空表示不修改原密码）；也可按 `Esc` 取消。
+  保存走 `db_vault.update_account()`（密码传 `None` 保持原值）。
+  避免「删了重录」这种既费事又容易删错的操作。
 
 ## 四、图标方案
 
@@ -184,7 +195,7 @@ python main.py
 | 头顶角标 | 常驻显示「N 待办」；存在临近截止（≤12h）的待办时由粉色变红 |
 | 右键 → 历史所有 | 弹出表格，展示全部历史记录（日期 | 次数 | MVP 键），按日期倒序（最近的排最前） |
 | 右键 → 键盘热力图 | 弹出 26 键实时热度面板 |
-| 右键 → 琥珀 | 打开琥珀搜索窗口（**输入名字才检索**，模糊匹配 + 点击解密显示） |
+| 右键 → 琥珀 | 打开琥珀搜索窗口（**输入名字才检索**，模糊匹配 + 点击解密显示；支持新增/编辑/删除） |
 | 右键 → 一键最小化 | 最小化所有可见窗口回到桌面（不关闭） |
 | 右键 → 开机自启动 | 切换开关；勾选 = 开机自动常驻 |
 | 右键 → 退出 | 退出程序（自动落库） |

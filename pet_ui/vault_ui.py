@@ -6,6 +6,8 @@
     录入(手动) → 加密落库 → 桌宠右键 → 搜索框 + 模糊匹配
     → 选中 → 解密显示 → 自动清屏
 
+支持的操作：新增 / 编辑（密码留空即不改）/ 删除 / 显示密码。
+
 设计要点：
 - 作为 Mixin 混入 PetApp（与 popup.py / schedule.py 同套路）。
 - 「先藏后显」：窗口构建期间 withdraw，全部就绪再 deiconify，
@@ -26,6 +28,7 @@ import vault_crypto
 import vault_search
 from logger import logger
 from pet_ui.theme import (
+    ACC_OVERDUE,
     ACC_TODAY,
     UI_BG,
     UI_BORDER,
@@ -35,6 +38,9 @@ from pet_ui.theme import (
 )
 
 # 明文自动清屏倒计时（秒）：到点清空显示并关闭密码气泡
+#
+# 字段（用户定稿）：名称/密码必填，网址选填；账号/别名/备注已去除。
+# 条目选中后，「显示密码」气泡会同时展示 名称 + 网址 + 密码。
 REVEAL_SECONDS = 12
 
 
@@ -126,45 +132,81 @@ class VaultMixin:
             highlightbackground=UI_BORDER, activebackground=UI_BORDER,
         ).pack(side='left', padx=(8, 0))
         tk.Button(
+            btns, text='编辑', command=self._on_vault_edit,
+            font=('Microsoft YaHei UI', 11), bg=UI_BG, fg=UI_TEXT,
+            relief='flat', bd=0, padx=12, highlightthickness=1,
+            highlightbackground=UI_BORDER, activebackground=UI_BORDER,
+        ).pack(side='left', padx=(8, 0))
+        tk.Button(
             btns, text='删除', command=self._on_vault_delete,
             font=('Microsoft YaHei UI', 11), bg=UI_BG, fg=UI_MUTED,
             relief='flat', bd=0, padx=12, highlightthickness=1,
             highlightbackground=UI_BORDER, activebackground=UI_BORDER,
         ).pack(side='left', padx=(8, 0))
 
-        # ---- 新增区（默认隐藏，点「新增」展开）----
+        # ---- 新增 / 编辑区（默认隐藏，点「新增」或「编辑」展开）----
+        # 字段：名称/密码必填；网址、备注选填。
+        # （账号/别名列保留在表里但前端不再录入；备注已按需加回。）
+        # 编辑态与新增态共用此表单：编辑时密码框留空表示「不修改密码」。
+        self._vault_editing_id = None   # 非 None 表示当前处于编辑态
         self._vault_add_frame = tk.Frame(top, bg=UI_BG)
         self._vault_add_vars = {}
+        self._vault_add_labels = {}
         add_specs = [
-            ('name', '名称', 18),
+            ('name', '名称 *', 18),
+            ('password', '密码 *', 16),
             ('url', '网址', 18),
-            ('username', '账号', 18),
-            ('password', '密码', 18),
-            ('aliases', '别名(逗号分隔)', 18),
             ('note', '备注', 18),
         ]
         for key, label, width in add_specs:
             row = tk.Frame(self._vault_add_frame, bg=UI_BG)
             row.pack(fill='x', pady=2)
-            tk.Label(
-                row, text=label, width=14, anchor='w',
+            lab = tk.Label(
+                row, text=label, width=16, anchor='w',
                 font=('Microsoft YaHei UI', 10), bg=UI_BG, fg=UI_MUTED,
-            ).pack(side='left')
+            )
+            lab.pack(side='left')
+            self._vault_add_labels[key] = lab
             var = tk.StringVar()
             self._vault_add_vars[key] = var
-            tk.Entry(
+            # 密码框右侧留一个「小眼睛」开关（先 pack 右侧，占住位置）
+            eye = None
+            if key == 'password':
+                eye = tk.Label(
+                    row, text='👁', font=('Microsoft YaHei UI', 12),
+                    bg=UI_BG, fg=UI_MUTED, cursor='hand2',
+                )
+                eye.pack(side='right', padx=(4, 2))
+                eye.bind('<Button-1>', lambda e: self._toggle_pw_visible())
+                # 用默认参数把 eye 当场绑死：否则 lambda 晚绑定，
+                # 事件触发时读到的 eye 已是循环结束后的 None。
+                eye.bind('<Enter>', lambda e, w=eye: w.config(fg=ACC_TODAY))
+                eye.bind('<Leave>', lambda e, w=eye: w.config(fg=UI_MUTED))
+                self._vault_eye = eye
+            entry = tk.Entry(
                 row, textvariable=var, width=width,
                 show='*' if key == 'password' else '',
                 font=('Microsoft YaHei UI', 11),
                 bg=UI_BG, fg=UI_TEXT, insertbackground=ACC_TODAY,
                 relief='flat', highlightthickness=1,
                 highlightbackground=UI_BORDER, highlightcolor=ACC_TODAY,
-            ).pack(side='left', fill='x', expand=True, ipady=4)
-        tk.Button(
+            )
+            entry.pack(side='left', fill='x', expand=True, ipady=4)
+            if key == 'password':
+                self._vault_pw_entry = entry
+                self._vault_pw_visible = False
+        self._vault_form_hint = tk.Label(
+            self._vault_add_frame, text='* 为必填；网址/备注选填',
+            font=('Microsoft YaHei UI', 9), bg=UI_BG, fg=UI_MUTED,
+            anchor='w',
+        )
+        self._vault_form_hint.pack(fill='x', pady=(4, 0))
+        self._vault_save_btn = tk.Button(
             self._vault_add_frame, text='保存', command=self._on_vault_save,
             font=('Microsoft YaHei UI', 11), bg=ACC_TODAY, fg='#06121a',
             relief='flat', bd=0, padx=16, activebackground=ACC_TODAY,
-        ).pack(anchor='e', pady=(6, 0))
+        )
+        self._vault_save_btn.pack(anchor='e', pady=(6, 0))
 
         # ---- 定位：贴在桌宠右侧（放不下则左侧），夹紧到屏幕内 ----
         top.update_idletasks()
@@ -183,6 +225,8 @@ class VaultMixin:
         # 内容就绪：刷新列表并显示
         self._vault_refresh()
         top.deiconify()
+        # Esc 退出编辑态（若有）
+        top.bind('<Escape>', lambda e: self._vault_cancel_edit())
         entry.focus_set()
 
     def _on_vault_close(self):
@@ -265,7 +309,8 @@ class VaultMixin:
         self._show_reveal_window(rec, plain)
 
     def _show_reveal_window(self, rec, plain):
-        """弹出密码显示气泡，显示明文并在 REVEAL_SECONDS 后自动清屏关闭。"""
+        """弹出密码显示气泡，显示明文，可点「✕」手动关闭，
+        或到 REVEAL_SECONDS 后自动清屏关闭。"""
         self._clear_reveal()
 
         win = tk.Toplevel(self.root)
@@ -274,21 +319,54 @@ class VaultMixin:
         win.attributes('-topmost', True)
         win.config(bg=UI_BG)
         win.withdraw()
+        # Esc 也可手动关闭
+        win.bind('<Escape>', lambda e: self._clear_reveal())
 
         pad = 14
         frame = tk.Frame(win, bg=UI_BG, highlightthickness=1,
                          highlightbackground=ACC_TODAY)
         frame.pack(fill='both', expand=True)
 
+        # 标题行：左名称 + 右「×」手动关闭（复制完可自己叉掉）
+        head = tk.Frame(frame, bg=UI_BG)
+        head.pack(fill='x', padx=pad, pady=(pad, 2))
         tk.Label(
-            frame, text=rec['name'], font=('Microsoft YaHei UI', 12, 'bold'),
+            head, text=rec['name'], font=('Microsoft YaHei UI', 12, 'bold'),
             bg=UI_BG, fg=UI_TEXT, anchor='w',
-        ).pack(fill='x', padx=pad, pady=(pad, 2))
-        if rec['username']:
+        ).pack(side='left')
+        close_btn = tk.Label(
+            head, text='✕', font=('Microsoft YaHei UI', 12),
+            bg=UI_BG, fg=UI_MUTED, cursor='hand2',
+        )
+        close_btn.pack(side='right')
+        close_btn.bind('<Button-1>', lambda e: self._clear_reveal())
+        # 悬停变红，暗示「关掉」
+        close_btn.bind(
+            '<Enter>', lambda e: close_btn.config(fg=ACC_OVERDUE))
+        close_btn.bind(
+            '<Leave>', lambda e: close_btn.config(fg=UI_MUTED))
+
+        # 网址：与密码一同展示（用户要求“网址和密码一块显示”）
+        if rec.get('url'):
             tk.Label(
-                frame, text=f'账号：{rec["username"]}',
+                frame, text=f'网址：{rec["url"]}',
                 font=('Microsoft YaHei UI', 10), bg=UI_BG, fg=UI_MUTED,
                 anchor='w',
+            ).pack(fill='x', padx=pad)
+            tk.Button(
+                frame, text='打开网址',
+                command=lambda u=rec['url']: self._open_url(u),
+                font=('Microsoft YaHei UI', 9), bg=UI_BG, fg=ACC_TODAY,
+                relief='flat', bd=0, cursor='hand2',
+                activebackground=UI_BG,
+            ).pack(anchor='w', padx=pad)
+
+        # 备注：一并展示（若有）
+        if rec.get('note'):
+            tk.Label(
+                frame, text=f'备注：{rec["note"]}',
+                font=('Microsoft YaHei UI', 10), bg=UI_BG, fg=UI_MUTED,
+                anchor='w', justify='left', wraplength=260,
             ).pack(fill='x', padx=pad)
 
         # 密码：只读 Entry（可全选复制），明文只在此短暂存在
@@ -303,6 +381,12 @@ class VaultMixin:
         pw_entry.pack(fill='x', padx=pad, pady=(8, 4), ipady=6)
         pw_entry.focus_set()
         pw_entry.selection_range(0, 'end')
+
+        tk.Button(
+            frame, text='复制密码', command=lambda: self._copy_text(plain),
+            font=('Microsoft YaHei UI', 9), bg=UI_BG, fg=ACC_TODAY,
+            relief='flat', bd=0, cursor='hand2', activebackground=UI_BG,
+        ).pack(anchor='w', padx=pad, pady=(0, 2))
 
         countdown = tk.Label(
             frame, text='', font=('Microsoft YaHei UI', 9),
@@ -365,13 +449,88 @@ class VaultMixin:
             except Exception:
                 pass
 
+    def _toggle_pw_visible(self):
+        """小眼睛：在掩码 / 明文之间切换密码框显示，方便确认输对没。"""
+        entry = getattr(self, '_vault_pw_entry', None)
+        eye = getattr(self, '_vault_eye', None)
+        if entry is None:
+            return
+        self._vault_pw_visible = not getattr(self, '_vault_pw_visible', False)
+        try:
+            entry.config(show='' if self._vault_pw_visible else '*')
+        except Exception:
+            return
+        # 显示明文时眼睛点亮为主色，提示当前状态
+        if eye is not None:
+            try:
+                eye.config(fg=ACC_TODAY if self._vault_pw_visible else UI_MUTED)
+            except Exception:
+                pass
+
+    def _reset_pw_visible(self):
+        """把密码框恢复为掩码态（切换表单模式 / 保存 / 取消时调用）。"""
+        self._vault_pw_visible = False
+        entry = getattr(self, '_vault_pw_entry', None)
+        if entry is not None:
+            try:
+                entry.config(show='*')
+            except Exception:
+                pass
+        eye = getattr(self, '_vault_eye', None)
+        if eye is not None:
+            try:
+                eye.config(fg=UI_MUTED)
+            except Exception:
+                pass
+
     def _on_vault_add(self):
-        """展开/折叠新增表单。"""
+        """展开/折叠新增表单（新增态）。
+
+        若当前正处于编辑态，点「新增」视为退出编辑、切换到新增态。
+        """
         f = self._vault_add_frame
-        if f.winfo_ismapped():
+        # 已在新增态且表单已展开 → 收起
+        if f.winfo_ismapped() and self._vault_editing_id is None:
             f.pack_forget()
             return
-        f.pack(fill='x', padx=16, pady=(0, 12))
+        self._enter_form_mode(editing_id=None)
+
+    def _on_vault_edit(self):
+        """编辑选中条目：把名称/网址填回表单，密码框留空（留空=不改密码）。"""
+        rec = self._vault_selected()
+        if rec is None:
+            self._toast('先选中一条记录')
+            return
+        self._enter_form_mode(editing_id=rec['id'], rec=rec)
+
+    def _enter_form_mode(self, editing_id, rec=None):
+        """切到表单态（新增或编辑），统一处理填值、文案、按钮与定位。"""
+        self._vault_editing_id = editing_id
+        self._reset_pw_visible()   # 每次进入表单都回到掩码态
+        v = self._vault_add_vars
+        # 清空后按需回填
+        for var in v.values():
+            var.set('')
+        if editing_id is not None and rec is not None:
+            v['name'].set(rec.get('name', ''))
+            v['url'].set(rec.get('url', ''))
+            v['note'].set(rec.get('note', ''))
+            # 密码框留空：不回填明文，留空即不修改
+            self._vault_add_labels['password'].config(
+                text='密码（留空不改）', width=16)
+            self._vault_form_hint.config(
+                text='编辑中：密码留空则保持原密码不变')
+            self._vault_save_btn.config(text='保存修改')
+        else:
+            self._vault_add_labels['password'].config(
+                text='密码 *', width=16)
+            self._vault_form_hint.config(
+                text='* 为必填；网址/备注选填')
+            self._vault_save_btn.config(text='保存')
+
+        f = self._vault_add_frame
+        if not f.winfo_ismapped():
+            f.pack(fill='x', padx=16, pady=(0, 12))
         # 窗口变高后重新夹紧到屏幕内，避免超出下边界
         try:
             self._vault_win.update_idletasks()
@@ -382,40 +541,94 @@ class VaultMixin:
             win.geometry(f'+{win.winfo_x()}+{int(py)}')
         except Exception:
             pass
+        try:
+            self._vault_win.focus_force()
+        except Exception:
+            pass
+
+    def _vault_cancel_edit(self):
+        """取消编辑/收起表单（Esc 或保存后调用）。"""
+        self._vault_editing_id = None
+        self._reset_pw_visible()
+        for var in self._vault_add_vars.values():
+            var.set('')
+        self._vault_add_labels['password'].config(text='密码 *', width=16)
+        self._vault_form_hint.config(
+            text='* 为必填；网址/备注选填')
+        self._vault_save_btn.config(text='保存')
+        try:
+            self._vault_add_frame.pack_forget()
+        except Exception:
+            pass
 
     def _on_vault_save(self):
-        """保存新条目：密码先加密再落库（绝不存明文）。"""
+        """保存：新增走 add，编辑走 update（密码留空则不改）。
+
+        密码先加密再落库（绝不存明文）。
+        """
         v = self._vault_add_vars
         name = v['name'].get().strip()
         password = v['password'].get()
+        editing = self._vault_editing_id
         if not name:
             self._toast('名称不能为空')
             return
-        if not password:
+        # 新增：密码必填；编辑：密码可留空（表示不改）
+        if editing is None and not password:
             self._toast('密码不能为空')
             return
+
+        enc = None
+        if password:
+            try:
+                enc = vault_crypto.encrypt(password)
+            except Exception:
+                logger.exception('密码加密失败')
+                self._toast('加密失败，无法保存')
+                return
         try:
-            enc = vault_crypto.encrypt(password)
+            if editing is None:
+                db_vault.add_account(
+                    name=name, password_enc=enc, url=v['url'].get(),
+                    note=v['note'].get(),
+                )
+            else:
+                # password_enc=None 时 update_account 保持原密码不变
+                ok = db_vault.update_account(
+                    editing, name=name, url=v['url'].get(),
+                    password_enc=enc, note=v['note'].get(),
+                )
+                if not ok:
+                    self._toast('修改失败：条目可能已被删除')
+                    return
         except Exception:
-            logger.exception('密码加密失败')
-            self._toast('加密失败，无法保存')
-            return
-        try:
-            db_vault.add_account(
-                name=name, password_enc=enc,
-                url=v['url'].get(), username=v['username'].get(),
-                aliases=v['aliases'].get(), note=v['note'].get(),
-            )
-        except Exception:
-            logger.exception('保存密码条目失败')
+            logger.exception('保存琥珀条目失败')
             self._toast('保存失败')
             return
-        # 清空表单并收起
-        for var in v.values():
-            var.set('')
-        self._vault_add_frame.pack_forget()
+        self._vault_cancel_edit()
         self._vault_refresh()
-        self._toast('已保存')
+        self._toast('已保存修改' if editing is not None else '已保存')
+
+    # ---------- 小工具 ----------
+    def _open_url(self, url):
+        """用默认浏览器打开网址（自动补 https://）。"""
+        import webbrowser
+        target = url if '://' in url else 'https://' + url
+        try:
+            webbrowser.open(target)
+        except Exception:
+            logger.exception('打开网址失败')
+            self._toast('打开网址失败')
+
+    def _copy_text(self, text):
+        """把文本复制到系统剪贴板。"""
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self._toast('已复制')
+        except Exception:
+            logger.exception('复制失败')
+            self._toast('复制失败')
 
     def _on_vault_delete(self):
         """删除选中条目（二次确认，避免误删）。"""
@@ -428,9 +641,12 @@ class VaultMixin:
         try:
             db_vault.delete_account(rec['id'])
         except Exception:
-            logger.exception('删除密码条目失败')
+            logger.exception('删除琥珀条目失败')
             self._toast('删除失败')
             return
+        # 若正在编辑的正是被删的这条，退出编辑态避免保存到已删条目
+        if self._vault_editing_id == rec['id']:
+            self._vault_cancel_edit()
         self._vault_refresh()
         self._toast('已删除')
 
