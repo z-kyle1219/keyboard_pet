@@ -139,7 +139,7 @@ class VaultMixin:
         ).pack(side='left', padx=(8, 0))
         tk.Button(
             btns, text='删除', command=self._on_vault_delete,
-            font=('Microsoft YaHei UI', 11), bg=UI_BG, fg=UI_MUTED,
+            font=('Microsoft YaHei UI', 11), bg=UI_BG, fg=UI_TEXT,
             relief='flat', bd=0, padx=12, highlightthickness=1,
             highlightbackground=UI_BORDER, activebackground=UI_BORDER,
         ).pack(side='left', padx=(8, 0))
