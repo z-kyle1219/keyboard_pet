@@ -16,10 +16,15 @@
   半截词、别名（aliases）命中。
 - 密码**只在点击「显示」时**才解密，明文只短暂显示在一个只读框里，
   到点自动清空并关闭；不写日志、不进列表。
+- **跟随桌宠**：搜索窗口与密码气泡都通过 `_place_vault_win()` /
+  `_place_reveal_win()` 按桌宠当前位置重算，拖拽桌宠时一起移动
+  （与天气卡片 `_place_weather_win` 同一套机制）。
 - **搜索驱动（隐私）**：窗口默认不铺任何条目名，只有搜索框；
   **必须输入关键词才检索**，查什么名字才出什么结果。避免把全部
   账号清单直接晾在屏幕上。
-- 配色沿用 theme 的深空霓虹体系（UI_THEME）。
+- 配色：搜索窗口沿用 theme 深空霓虹（UI_THEME）；
+  **密码展示气泡另用「玄墨极简」专属配色**（INK_*），
+  与左键「今日战报」的锡金国潮刻意分开。
 """
 import tkinter as tk
 
@@ -28,20 +33,34 @@ import vault_crypto
 import vault_search
 from logger import logger
 from pet_ui.theme import (
-    ACC_OVERDUE,
     ACC_TODAY,
     UI_BG,
     UI_BORDER,
     UI_MUTED,
     UI_TEXT,
-    tint,
 )
 
 # 明文自动清屏倒计时（秒）：到点清空显示并关闭密码气泡
 #
-# 字段（用户定稿）：名称/密码必填，网址选填；账号/别名/备注已去除。
-# 条目选中后，「显示密码」气泡会同时展示 名称 + 网址 + 密码。
+# 字段（用户定稿）：名称/密码必填，网址/备注选填。
+# 条目选中后，「显示密码」气泡会同时展示 名称 + 网址 + 备注 + 密码。
 REVEAL_SECONDS = 12
+
+# ============================================================
+# 密码气泡专属配色（玄墨极简）
+# ============================================================
+# 与「今日战报」的锡金国潮体系刻意分开：那里是玄黑 + 描金，
+# 这里用冷峻的墨灰 + 左侧细线，克制无装饰，工具感更强。
+# （左键展示 MVP 键仍走 popup.py 的锡金风格，互不影响。）
+INK_BG = '#2C2C2A'          # 卡片底（玄墨）
+INK_BORDER = '#444441'      # 外框
+INK_TEXT = '#F1EFE8'        # 主文字（亮墨白）
+INK_MUTED = '#888780'       # 次要文字
+INK_FAINT = '#5F5E5A'       # 极淡（倒计时 / 关闭钮）
+INK_ACCENT = '#D3D1C7'      # 强调 / 主按钮底（淡石色）
+INK_LINE = '#888780'        # 密码区左侧细线
+INK_INK = '#2C2C2A'         # 亮底上的深字（按钮文字）
+INK_DANGER = '#F09595'      # 悬停关闭（柔红）
 
 
 class VaultMixin:
@@ -210,17 +229,9 @@ class VaultMixin:
 
         # ---- 定位：贴在桌宠右侧（放不下则左侧），夹紧到屏幕内 ----
         top.update_idletasks()
-        win_w = max(top.winfo_reqwidth(), 380)
-        win_h = top.winfo_reqheight()
-        px = self.root.winfo_x() + self._frame_w + 8
-        py = self.root.winfo_y()
-        sw = top.winfo_screenwidth()
-        sh = top.winfo_screenheight()
-        if px + win_w > sw:
-            px = self.root.winfo_x() - win_w - 8
-        px = max(0, min(px, sw - win_w))
-        py = max(0, min(py, sh - win_h))
-        top.geometry(f'+{int(px)}+{int(py)}')
+        self._vault_w = max(top.winfo_reqwidth(), 380)
+        self._vault_h = top.winfo_reqheight()
+        self._place_vault_win()
 
         # 内容就绪：刷新列表并显示
         self._vault_refresh()
@@ -228,6 +239,34 @@ class VaultMixin:
         # Esc 退出编辑态（若有）
         top.bind('<Escape>', lambda e: self._vault_cancel_edit())
         entry.focus_set()
+
+    def _place_vault_win(self):
+        """把琥珀搜索窗口重定位到桌宠旁（拖拽桌宠时跟随）。
+
+        与初始定位同一套规则：优先贴桌宠右侧，放不下则左侧，
+        再夹紧到屏幕内。每次用当前桌宠位置重算，不能复用旧坐标。
+        尺寸用缓存的 _vault_w/_vault_h（表单展开/收起时会刷新）。
+        """
+        top = getattr(self, '_vault_win', None)
+        if top is None:
+            return
+        try:
+            if not top.winfo_exists():
+                return
+            win_w = getattr(self, '_vault_w', 380)
+            win_h = getattr(self, '_vault_h', 200)
+            px = self.root.winfo_x() + self._frame_w + 8
+            py = self.root.winfo_y()
+            sw = top.winfo_screenwidth()
+            sh = top.winfo_screenheight()
+            if px + win_w > sw:
+                px = self.root.winfo_x() - win_w - 8
+            px = max(0, min(px, sw - win_w))
+            py = max(0, min(py, sh - win_h))
+            top.geometry(f'+{int(px)}+{int(py)}')
+            top.attributes('-topmost', True)
+        except Exception:
+            pass
 
     def _on_vault_close(self):
         """关闭密码本窗口（同时清掉可能的明文显示）。"""
@@ -309,7 +348,7 @@ class VaultMixin:
         self._show_reveal_window(rec, plain)
 
     def _show_reveal_window(self, rec, plain):
-        """弹出密码显示气泡，显示明文，可点「✕」手动关闭，
+        """弹出密码显示气泡（玄墨极简），显示明文，可点「✕」手动关闭，
         或到 REVEAL_SECONDS 后自动清屏关闭。"""
         self._clear_reveal()
 
@@ -317,91 +356,101 @@ class VaultMixin:
         self._reveal_win = win
         win.overrideredirect(True)
         win.attributes('-topmost', True)
-        win.config(bg=UI_BG)
+        win.config(bg=INK_BG)
         win.withdraw()
         # Esc 也可手动关闭
         win.bind('<Escape>', lambda e: self._clear_reveal())
 
-        pad = 14
-        frame = tk.Frame(win, bg=UI_BG, highlightthickness=1,
-                         highlightbackground=ACC_TODAY)
+        pad = 16
+        frame = tk.Frame(win, bg=INK_BG, highlightthickness=1,
+                         highlightbackground=INK_BORDER)
         frame.pack(fill='both', expand=True)
 
         # 标题行：左名称 + 右「×」手动关闭（复制完可自己叉掉）
-        head = tk.Frame(frame, bg=UI_BG)
+        head = tk.Frame(frame, bg=INK_BG)
         head.pack(fill='x', padx=pad, pady=(pad, 2))
         tk.Label(
             head, text=rec['name'], font=('Microsoft YaHei UI', 12, 'bold'),
-            bg=UI_BG, fg=UI_TEXT, anchor='w',
+            bg=INK_BG, fg=INK_TEXT, anchor='w',
         ).pack(side='left')
         close_btn = tk.Label(
             head, text='✕', font=('Microsoft YaHei UI', 12),
-            bg=UI_BG, fg=UI_MUTED, cursor='hand2',
+            bg=INK_BG, fg=INK_FAINT, cursor='hand2',
         )
         close_btn.pack(side='right')
         close_btn.bind('<Button-1>', lambda e: self._clear_reveal())
-        # 悬停变红，暗示「关掉」
+        # 悬停变柔红，暗示「关掉」
         close_btn.bind(
-            '<Enter>', lambda e: close_btn.config(fg=ACC_OVERDUE))
+            '<Enter>', lambda e: close_btn.config(fg=INK_DANGER))
         close_btn.bind(
-            '<Leave>', lambda e: close_btn.config(fg=UI_MUTED))
+            '<Leave>', lambda e: close_btn.config(fg=INK_FAINT))
 
         # 网址：与密码一同展示（用户要求“网址和密码一块显示”）
         if rec.get('url'):
             tk.Label(
-                frame, text=f'网址：{rec["url"]}',
-                font=('Microsoft YaHei UI', 10), bg=UI_BG, fg=UI_MUTED,
+                frame, text=rec['url'],
+                font=('Consolas', 10), bg=INK_BG, fg=INK_MUTED,
                 anchor='w',
             ).pack(fill='x', padx=pad)
-            tk.Button(
-                frame, text='打开网址',
-                command=lambda u=rec['url']: self._open_url(u),
-                font=('Microsoft YaHei UI', 9), bg=UI_BG, fg=ACC_TODAY,
-                relief='flat', bd=0, cursor='hand2',
-                activebackground=UI_BG,
-            ).pack(anchor='w', padx=pad)
 
         # 备注：一并展示（若有）
         if rec.get('note'):
             tk.Label(
-                frame, text=f'备注：{rec["note"]}',
-                font=('Microsoft YaHei UI', 10), bg=UI_BG, fg=UI_MUTED,
+                frame, text=rec['note'],
+                font=('Microsoft YaHei UI', 10), bg=INK_BG, fg=INK_MUTED,
                 anchor='w', justify='left', wraplength=260,
-            ).pack(fill='x', padx=pad)
+            ).pack(fill='x', padx=pad, pady=(2, 0))
 
-        # 密码：只读 Entry（可全选复制），明文只在此短暂存在
+        # 密码区：左侧细线 + 等宽字（玄墨极简的标志性处理，不用填充块）
+        pw_row = tk.Frame(frame, bg=INK_BG)
+        pw_row.pack(fill='x', padx=pad, pady=(12, 10))
+        tk.Frame(pw_row, bg=INK_LINE, width=2).pack(side='left', fill='y')
         pw_var = tk.StringVar(value=plain)
         pw_entry = tk.Entry(
-            frame, textvariable=pw_var, font=('Consolas', 13),
-            bg=tint(ACC_TODAY, UI_BG, 0.12), fg=UI_TEXT, relief='flat',
-            readonlybackground=tint(ACC_TODAY, UI_BG, 0.12),
-            highlightthickness=0, justify='center',
+            pw_row, textvariable=pw_var, font=('Consolas', 14),
+            bg=INK_BG, fg=INK_TEXT, relief='flat', bd=0,
+            readonlybackground=INK_BG, highlightthickness=0,
+            justify='left',
         )
         pw_entry.configure(state='readonly')
-        pw_entry.pack(fill='x', padx=pad, pady=(8, 4), ipady=6)
+        pw_entry.pack(side='left', fill='x', expand=True, padx=(12, 0))
         pw_entry.focus_set()
         pw_entry.selection_range(0, 'end')
 
-        tk.Button(
-            frame, text='复制密码', command=lambda: self._copy_text(plain),
-            font=('Microsoft YaHei UI', 9), bg=UI_BG, fg=ACC_TODAY,
-            relief='flat', bd=0, cursor='hand2', activebackground=UI_BG,
-        ).pack(anchor='w', padx=pad, pady=(0, 2))
+        # 操作区：主按钮（实底）+ 次按钮（描边）
+        btns = tk.Frame(frame, bg=INK_BG)
+        btns.pack(fill='x', padx=pad)
+        tk.Label(
+            btns, text='复制密码',
+            font=('Microsoft YaHei UI', 10),
+            bg=INK_ACCENT, fg=INK_INK, padx=14, pady=6, cursor='hand2',
+        ).pack(side='left')
+        if rec.get('url'):
+            tk.Label(
+                btns, text='打开网址',
+                font=('Microsoft YaHei UI', 10),
+                bg=INK_BG, fg=INK_ACCENT, padx=14, pady=6, cursor='hand2',
+                highlightthickness=1, highlightbackground=INK_FAINT,
+            ).pack(side='left', padx=(8, 0))
+        # 绑定点击（用默认参数把命令绑死，避开闭包晚绑定）
+        for child in btns.winfo_children():
+            if child.cget('text') == '复制密码':
+                child.bind('<Button-1>',
+                           lambda e, t=plain: self._copy_text(t))
+            elif child.cget('text') == '打开网址':
+                child.bind('<Button-1>',
+                           lambda e, u=rec['url']: self._open_url(u))
 
         countdown = tk.Label(
             frame, text='', font=('Microsoft YaHei UI', 9),
-            bg=UI_BG, fg=UI_MUTED,
+            bg=INK_BG, fg=INK_FAINT, anchor='w',
         )
-        countdown.pack(fill='x', padx=pad, pady=(0, pad))
+        countdown.pack(fill='x', padx=pad, pady=(10, pad))
 
         win.update_idletasks()
-        w = max(win.winfo_reqwidth(), 260)
-        h = win.winfo_reqheight()
-        x = self.root.winfo_x() + self._frame_w // 2 - w // 2
-        y = self.root.winfo_y() - h - 8
-        if y < 0:
-            y = self.root.winfo_y() + self._frame_h + 8
-        win.geometry(f'{w}x{h}+{x}+{y}')
+        self._reveal_w = max(win.winfo_reqwidth(), 260)
+        self._reveal_h = win.winfo_reqheight()
+        self._place_reveal_win()
         win.deiconify()
 
         # 倒计时自动清屏：先清明文，再关窗口
@@ -421,6 +470,30 @@ class VaultMixin:
             self._reveal_after_ids.append(aid)
 
         _tick(REVEAL_SECONDS)
+
+    def _place_reveal_win(self):
+        """把密码显示气泡重定位到桌宠旁（拖拽桌宠时跟随）。
+
+        与初始定位一致：优先放桌宠上方，上方不够则下方，左右居中并夹在屏内。
+        尺寸用缓存的 _reveal_w/_reveal_h（打开时算一次）。
+        """
+        win = getattr(self, '_reveal_win', None)
+        if win is None:
+            return
+        try:
+            if not win.winfo_exists():
+                return
+            w = getattr(self, '_reveal_w', 260)
+            h = getattr(self, '_reveal_h', 120)
+            x = self.root.winfo_x() + self._frame_w // 2 - w // 2
+            x = max(0, x)
+            y = self.root.winfo_y() - h - 8
+            if y < 0:
+                y = self.root.winfo_y() + self._frame_h + 8
+            win.geometry(f'{w}x{h}+{x}+{y}')
+            win.attributes('-topmost', True)
+        except Exception:
+            pass
 
     def _reveal_exists(self):
         try:
@@ -531,16 +604,14 @@ class VaultMixin:
         f = self._vault_add_frame
         if not f.winfo_ismapped():
             f.pack(fill='x', padx=16, pady=(0, 12))
-        # 窗口变高后重新夹紧到屏幕内，避免超出下边界
+        # 表单展开后高度变化：刷新缓存尺寸并重定位（仍贴桌宠、不超屏）
         try:
             self._vault_win.update_idletasks()
-            win = self._vault_win
-            h = win.winfo_reqheight()
-            sh = win.winfo_screenheight()
-            py = min(win.winfo_y(), max(0, sh - h))
-            win.geometry(f'+{win.winfo_x()}+{int(py)}')
+            self._vault_w = max(self._vault_win.winfo_reqwidth(), 380)
+            self._vault_h = self._vault_win.winfo_reqheight()
         except Exception:
             pass
+        self._place_vault_win()
         try:
             self._vault_win.focus_force()
         except Exception:

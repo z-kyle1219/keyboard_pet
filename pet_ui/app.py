@@ -75,6 +75,10 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
         self._vault_win = None      # 琥珀搜索窗口
         self._reveal_win = None     # 密码明文显示气泡（自动清屏）
         self._reveal_after_ids = []
+        self._vault_w = 380         # 琥珀窗口尺寸缓存（拖拽跟随用）
+        self._vault_h = 200
+        self._reveal_w = 260        # 密码气泡尺寸缓存
+        self._reveal_h = 120
         self._setup_window()
         self._load_icon()
 
@@ -161,6 +165,12 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
         # 让天气卡片跟随桌宠（并保持置顶不被遮挡）
         if getattr(self, '_weather_win', None) is not None:
             self._place_weather_win()
+        # 让琥珀搜索窗口跟随桌宠
+        if getattr(self, '_vault_win', None) is not None:
+            self._place_vault_win()
+        # 让密码显示气泡跟随桌宠
+        if getattr(self, '_reveal_win', None) is not None:
+            self._place_reveal_win()
         # 让关机提醒气泡跟随桌宠
         sw = getattr(self, '_shutdown_win', None)
         if sw is not None:
