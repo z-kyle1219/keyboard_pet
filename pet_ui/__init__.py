@@ -11,6 +11,7 @@
     popup.py       气泡卡片 + MVP 徽章 + 冠军登场特效
     heatmap.py     键盘热力图
     table.py       历史表格
+    app_stats.py   各软件分布（今天条形 / 近 7 天折线）
     checkbox.py    自绘圆形勾选框（日程表用）
     schedule.py    日程表（独立窗口 + 头顶角标）
     minimize.py    一键最小化（EnumWindows + SW_MINIMIZE）

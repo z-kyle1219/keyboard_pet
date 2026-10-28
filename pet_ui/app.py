@@ -8,6 +8,7 @@
 - PopupMixin      气泡卡片 / MVP 徽章 / 冠军登场特效
 - HeatmapMixin    键盘热力图
 - TableMixin      历史表格
+- AppStatsMixin   各软件分布（今天条形 / 近 7 天折线）
 - MinimizeMixin   一键最小化
 - VaultMixin      琥珀（密码存储：搜索 + 解密显示）
 
@@ -21,6 +22,7 @@ import autostart
 import config
 from logger import logger
 from pet_ui.animations import AnimationMixin
+from pet_ui.app_stats import AppStatsMixin
 from pet_ui.heatmap import HeatmapMixin
 from pet_ui.minimize import MinimizeMixin
 from pet_ui.popup import PopupMixin
@@ -38,10 +40,13 @@ from pet_ui.theme import TRANSPARENT, TEXT_DARK
 
 
 class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
-              ScheduleMixin, WeatherMixin, MinimizeMixin, VaultMixin):
-    def __init__(self, root, manager):
+              AppStatsMixin, ScheduleMixin, WeatherMixin, MinimizeMixin,
+              VaultMixin):
+    def __init__(self, root, manager, app_tracker=None):
         self.root = root
         self.manager = manager
+        # 按应用统计（可能为 None：只影响「各软件分布」菜单）
+        self.app_tracker = app_tracker
         self._press_origin = None
         self._moved = False
         self._icon = None
@@ -249,6 +254,8 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
                        bg='white', fg=TEXT_DARK,
                        activebackground='#1f1f1f', activeforeground='white')
         menu.add_command(label='历史所有', command=self._show_table)
+        menu.add_separator()
+        menu.add_command(label='各软件分布', command=self._show_app_stats)
         menu.add_separator()
         menu.add_command(label='键盘热力图', command=self._show_heatmap)
         menu.add_separator()

@@ -49,6 +49,14 @@ logs/
 # config.json（可能含本地图标绝对路径）被误提交。
 config.json
 
+# 统计导出（运行时生成，供 AI 读取；不入库）
+app_stats.json
+app_stats.json.tmp
+
+# exe 别名表：首次运行由 app_aliases.py 的 DEFAULT_ALIASES 导出，
+# 用户可在本地增补。真正的默认表在代码里，此文件不入库。
+app_aliases.json
+
 # ===================== 项目本地与生成物 =====================
 # WorkBuddy 项目本地数据（含个人记录），不入库
 .workbuddy/*

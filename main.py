@@ -11,9 +11,11 @@ import tkinter as tk
 
 from tracker import CountManager
 from listener import KeyListener
+from app_usage import AppUsageTracker
 from pet_ui import PetApp
 from scheduler import midnight_loop, periodic_save, weather_loop, WeatherState
 from logger import logger
+import stats_export
 
 
 def _enable_dpi_awareness():
@@ -32,22 +34,35 @@ def _enable_dpi_awareness():
 
 def main():
     _enable_dpi_awareness()
+    # 首次运行时生成一份可编辑的 exe 别名表（已存在则不覆盖）
+    try:
+        from app_aliases import write_default_file
+        write_default_file()
+    except Exception:
+        logger.exception('初始化 app_aliases.json 失败（不影响主流程）')
+
     manager = CountManager()
-    key_listener = KeyListener(manager)
+    # 按应用统计：敲键归属哪个 exe + 前台停留秒数
+    app_tracker = AppUsageTracker()
+    app_tracker.start()
+    key_listener = KeyListener(manager, app_tracker)
     key_listener.start()
 
-    # 后台线程：跨天刷新 + 周期落库
-    threading.Thread(target=midnight_loop, args=(manager,), daemon=True).start()
-    threading.Thread(target=periodic_save, args=(manager,), daemon=True).start()
+    # 后台线程：跨天刷新 + 周期落库（含应用统计与 JSON 导出）
+    threading.Thread(target=midnight_loop, args=(manager, app_tracker),
+                     daemon=True).start()
+    threading.Thread(target=periodic_save, args=(manager, app_tracker),
+                     daemon=True).start()
 
     root = tk.Tk()
     try:
-        app = PetApp(root, manager)  # 持有引用，避免被 GC
+        app = PetApp(root, manager, app_tracker)  # 持有引用，避免被 GC
     except Exception as e:
         # 界面初始化失败（如图标损坏、路径错误），记录日志而非崩溃
         logger.exception('桌宠界面初始化失败')
         key_listener.stop()
         manager.persist()
+        app_tracker.persist()
         root.destroy()
         sys.exit(1)
 
@@ -72,6 +87,11 @@ def main():
     finally:
         key_listener.stop()
         manager.persist()  # 退出前把当前次数落库
+        app_tracker.persist()
+        try:
+            stats_export.write_json(live_today=app_tracker.today())
+        except Exception:
+            pass
         logger.info('程序已退出')
 
 

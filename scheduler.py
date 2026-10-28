@@ -3,8 +3,10 @@ import threading
 import time
 from datetime import datetime, timedelta
 
+import stats_export
 
-def midnight_loop(manager):
+
+def midnight_loop(manager, app_tracker=None):
     """一直等到下一个 00:00:00，然后触发跨天滚动。"""
     while True:
         now = datetime.now()
@@ -13,16 +15,26 @@ def midnight_loop(manager):
         # +0.5 秒确保跨过整点（避免边界抖动）
         time.sleep((next_midnight - now).total_seconds() + 0.5)
         manager.rollover()
+        if app_tracker is not None:
+            app_tracker.rollover()
 
 
-def periodic_save(manager):
+def periodic_save(manager, app_tracker=None):
     """每 20 秒把当前次数与各键次数落库一次，防止意外退出丢数据。
 
     间隔缩短到 20 秒：关机/强杀最多丢最后 20 秒，降低数据丢失窗口。
+    若传入 app_tracker，一并落库并刷新对外的 app_stats.json。
     """
     while True:
         time.sleep(20)
         manager.persist()
+        if app_tracker is not None:
+            app_tracker.persist()
+            # 供 AI 直接读取的稳定 JSON 出口（全量覆盖，失败不影响主流程）
+            try:
+                stats_export.write_json(live_today=app_tracker.today())
+            except Exception:
+                pass
 
 
 # ============================================================

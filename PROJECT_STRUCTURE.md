@@ -18,7 +18,11 @@ keyboard_pet/
 ├── vault_search.py      # 琥珀模糊匹配（归一化 + 多字段加权打分，纯函数）
 ├── tracker.py           # 计数核心：线程安全的当天计数 + 按键明细 + 跨天滚动
 ├── listener.py          # 全局键盘监听（pynput，仅键盘）
-├── scheduler.py         # 后台线程：24:00 跨天刷新 + 周期落库
+├── foreground.py        # 前台窗口检测（纯 ctypes，取当前 exe 名 + HWND 缓存）
+├── app_usage.py         # 按应用统计（敲键次数 + 前台停留秒数 + 跨天归档）
+├── app_aliases.py       # exe → 友好名 + 分类 的映射（读 app_aliases.json）
+├── stats_export.py      # 稳定 JSON 出口（app_stats.json，供 AI 读取）
+├── scheduler.py         # 后台线程：24:00 跨天刷新 + 周期落库 + JSON 导出
 ├── pet_ui/              # 桌宠界面包（原单文件 pet_ui.py 拆分而来）
 │   ├── __init__.py      # 对外导出 PetApp（导入方式保持不变）
 │   ├── theme.py         # 配色与渲染参数常量
@@ -27,6 +31,7 @@ keyboard_pet/
 │   ├── popup.py         # 气泡卡片 + MVP 徽章 + 冠军登场特效
 │   ├── heatmap.py       # 键盘热力图窗口
 │   ├── table.py         # 历史表格（全部历史，倒序）
+│   ├── app_stats.py     # 各软件分布（今天=横向条形 / 近 7 天=折线）
 │   ├── schedule.py      # 日程表（独立窗口 + 头顶角标）
 │   ├── vault_ui.py      # 琥珀（密码存储：搜索 + 模糊匹配 + 点击解密 + 自动清屏）
 │   └── app.py           # PetApp 主类：窗口 / 图标 / 拖拽 / 右键菜单
@@ -36,6 +41,8 @@ keyboard_pet/
 │   └── *.jpg             # 无透明图时兜底（圆角显示）
 │
 ├── keyboard_stats.db    # SQLite 数据库（运行时自动生成）
+├── app_aliases.json     # exe 别名/分类表（首次运行生成，可手动增补）
+├── app_stats.json       # 统计导出（运行时生成，供 AI 读取）
 │
 ├── run.bat              # Windows 一键启动脚本
 ├── pyproject.toml       # uv 项目配置（依赖声明）
@@ -52,20 +59,25 @@ keyboard_pet/
 | **autostart.py** | 开机自启动 | 「启动」文件夹写入 `KeyboardPet.vbs`，用 pythonw 无窗口启动 main.py；开启/关闭 |
 | **logger.py** | 日志 | 写入 `pet.log`（UTF-8）；配合各模块排查运行时问题 |
 | **config.py** | 路径与资源发现 | `find_icon()` 优先扫描 `assets/` 里带透明通道的 PNG（回退任意图片）；无配置文件，换图只需替换 `assets/` 图片 |
-| **db.py** | 数据存取 | `daily_stats` 按天聚合 + `daily_key_stats` 按键明细；提供 `get_daily_mvp` 冠军键查询 |
+| **db.py** | 数据存取 | `daily_stats` 按天聚合 + `daily_key_stats` 按键明细 + `daily_app_stats` 按应用明细（复合主键 `(date, app)`）；提供 `get_daily_mvp` 冠军键查询 |
 | **db_todo.py** | 待办数据层 | `todo` 表（标题/截止/是否完成/完成时刻）；未完成轮换、勾掉留一天的查询逻辑 |
 | **db_vault.py** | 琥珀数据层 | `vault_accounts` 表；**只存取密文**，不负责加解密；名称/密码必填，网址/备注选填 |
 | **vault_crypto.py** | 琥珀加密 | Windows DPAPI（CryptProtectData）加密/解密；密钥由系统绑定当前账户，不落盘 |
 | **vault_search.py** | 模糊匹配 | 归一化（大小写/分隔符）+ 多字段加权打分；纯函数、无副作用，便于测试 |
 | **tracker.py** | 计数核心 | 线程安全 `Lock`；累计各键次数；跨天归档；重启恢复当天数据 |
 | **listener.py** | 键盘监听 | `pynput.keyboard.Listener`；仅键盘（含修饰键），鼠标不计 |
-| **scheduler.py** | 定时任务 | `midnight_loop` 等 24:00 跨天滚动；`periodic_save` 每 20s 落库 |
+| **scheduler.py** | 定时任务 | `midnight_loop` 等 24:00 跨天滚动；`periodic_save` 每 20s 落库并刷新 `app_stats.json` |
+| **foreground.py** | 前台检测 | 纯 ctypes 调 Win32（GetForegroundWindow → PID → QueryFullProcessImageNameW），HWND→exe 缓存；不新增依赖 |
+| **app_usage.py** | 按应用统计 | 内存计数 + 每秒采样前台窗口累计秒数；跨天归档；线程安全 |
+| **app_aliases.py** | 别名表 | `app_aliases.json` 映射 exe → 友好名 + 分类（dev/terminal/browse/chat/work/media/other）；未命中兜底 other |
+| **stats_export.py** | JSON 出口 | 生成结构固定的 `app_stats.json`（今天 + 近 7 天，含 count/seconds/占比），AI 可直接读 |
 | **pet_ui/app.py** | 界面主类 | 透明漂浮窗（人物轮廓+阴影）、拖拽拎起、右键菜单、帧预生成 |
 | **pet_ui/renderer.py** | 图像渲染 | `_prepare_pet` / `_make_shadow` / `_compose_frame` / `frame_to_photo` / 占位图 |
 | **pet_ui/animations.py** | 动画 | 呼吸循环、点击挤压回弹、拖拽拎起状态机 |
 | **pet_ui/popup.py** | 气泡 | 自适应圆角卡片、MVP 徽章、冠军登场特效、气泡跟随与关闭兜底 |
 | **pet_ui/heatmap.py** | 热力图 | 26 键实时热度、环形扩散特效、HOT KEY 统计 |
 | **pet_ui/table.py** | 历史表格 | `ttk.Treeview` 三列（日期/次数/MVP 键）、隔行变色；全部历史按日期倒序（最近的排最前） |
+| **pet_ui/app_stats.py** | 各软件分布 | 顶层切换「今天 / 近 7 天」，两个视图都可切「次数 / 时长」；今天为横向条形（Top5、默认只显相对长度、点击展开当前指标的具体值）；近 7 天为折线（Top3）；Pillow 2x 超采样渲染（Canvas 手绘无抗锯齿会发毛） |
 | **pet_ui/schedule.py** | 日程表 | 独立日程窗口（卡片+勾选+进度条，第三列完整汉字日期时间）；头顶角标（临近截止变红） |
 | **pet_ui/vault_ui.py** | 琥珀界面 | 搜索窗口（**输入关键词才检索**、默认不铺条目名）、模糊匹配列表、双击/按钮解密显示、明文自动清屏、新增/编辑（密码留空即不改，密码框有小眼睛） |
 | **pet_ui/theme.py** | 常量 | 配色、DPI 与动画参数集中管理 |
@@ -87,7 +99,31 @@ CREATE TABLE daily_key_stats (
     count INTEGER NOT NULL,   -- 该键当天次数
     PRIMARY KEY (date, key)
 );
+
+CREATE TABLE daily_app_stats (
+    date    TEXT NOT NULL,      -- '2026-10-27'
+    app     TEXT NOT NULL,      -- exe 名（如 'chrome.exe'）
+    count   INTEGER NOT NULL,   -- 当天在该应用里敲键次数
+    seconds INTEGER NOT NULL,   -- 当天该应用作为前台窗口的秒数
+    PRIMARY KEY (date, app)
+);
 ```
+
+`daily_app_stats` 的复合主键 `(date, app)` 表示「某天某应用的一格统计」：
+同一应用同一天只允许一行，天然防重复，不需要自增 id。
+它的两个指标是正交的——`count` 是打字强度，`seconds` 是占用时长；
+只看 count 会把「在浏览器看两小时网页」误判成低频使用。
+
+时间范围一律**单表聚合**（不是联表）：
+
+```sql
+-- 近 7 天各应用总和
+SELECT app, SUM(count), SUM(seconds) FROM daily_app_stats
+WHERE date >= ? GROUP BY app ORDER BY SUM(count) DESC;
+```
+
+`daily_stats`（运行态计数器）与 `daily_app_stats`（历史明细）职责不同，
+不是外键关系，查询各取所需，**不做 JOIN**。
 
 - 每天 24:00：把当天总次数与各键次数写入上述两表 → 清空 → 开始新的一天
 - `db.get_daily_mvp()`：查询全部历史记录（日期 | 次数 | MVP 键，按日期倒序）；MVP 键仅从 26 个英文字母中选出
@@ -196,6 +232,7 @@ python main.py
 | 左键单击 | 挤压回弹动画 + 弹气泡（统计）+ 弹日程窗口（待办，方案 A 分离式） |
 | 头顶角标 | 常驻显示「N 待办」；存在临近截止（≤12h）的待办时由粉色变红 |
 | 右键 → 历史所有 | 弹出表格，展示全部历史记录（日期 | 次数 | MVP 键），按日期倒序（最近的排最前） |
+| 右键 → 各软件分布 | 弹出分布窗口：顶部切「今天」（横向条形，Top5，点击条目展开次数+时长）/「近 7 天」（折线，Top3，可切「次数 / 时长」） |
 | 右键 → 键盘热力图 | 弹出 26 键实时热度面板 |
 | 右键 → 琥珀 | 打开琥珀搜索窗口（**输入名字才检索**，模糊匹配 + 点击解密显示；支持新增/编辑/删除） |
 | 右键 → 一键最小化 | 最小化所有可见窗口回到桌面（不关闭） |
@@ -210,6 +247,10 @@ python main.py
 2. **跨天前置检查**：`tracker.increment()` 在每次 +1 前先检查日期是否变化（`now != self._today`），若已跨天立即归档旧的一天再计数，避免依赖 `midnight_loop` 线程因休眠/挂起漏滚动。
 3. **长按计数口径**：长按一键时 `pynput` 自动重复触发 `on_press`，每次均 +1，与单击效果一致（均计入）。
 4. **落库容错**：`tracker.persist()`、跨天归档均用 try/except 包裹，写库失败只记日志，不拖垮程序。
+5. **前台检测不新增依赖**：`foreground.py` 用 ctypes 直调 Win32（`GetForegroundWindow` → `GetWindowThreadProcessId` → `QueryFullProcessImageNameW`），并对 HWND→exe 做缓存。取不到就跳过本次统计，绝不影响键盘监听。
+6. **时长采样防睡眠跳变**：`app_usage.tick()` 每帧最多累计 3 秒（`MAX_TICK_DELTA`），避免电脑休眠 8 小时后把整段时间全算到某个应用头上。
+7. **统计 JSON 原子写入**：`stats_export.write_json()` 先写 `.tmp` 再 `os.replace`，AI 不会读到写了一半的文件。
+8. **按键归属不丢**：每次按键都必须有归属——采样失败记入 `__unattributed__`（未识别），桌宠自己窗口（日程表/琥珀）里打的字记入 `__host__`（桌宠）。启动恢复时还会与 `daily_stats` 总数对一次账，把历史缺口也补进「未识别」。这样气泡的总次数与分布窗口的明细之和永远一致，不会出现 531 / 517 这种对不上的情况。
 
 ## 八、UI 设计（已优化）
 
