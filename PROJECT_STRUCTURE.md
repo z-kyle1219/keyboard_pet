@@ -36,6 +36,11 @@ keyboard_pet/
 │   ├── vault_ui.py      # 琥珀（密码存储：搜索 + 模糊匹配 + 点击解密 + 自动清屏）
 │   └── app.py           # PetApp 主类：窗口 / 图标 / 拖拽 / 右键菜单
 │
+├── tests/               # pytest 回归用例（琥珀加解密/模糊匹配、天气解析与循环、应用统计）
+├── conftest.py          # pytest 配置（让 tests/ 可被自动发现）
+├── scripts/             # 开发辅助脚本（非程序一部分）
+│   └── preview_weather_card.py  # 天气卡片离线预览生成
+│
 ├── assets/              # 资源目录
 │   ├── *.png             # 桌宠图标（优先带透明通道的 PNG，人物轮廓最佳）
 │   └── *.jpg             # 无透明图时兜底（圆角显示）

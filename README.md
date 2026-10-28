@@ -12,6 +12,7 @@
 - **点击提示**：左键单击弹出「宝宝今天点击键盘的次数是 X，快去休息吧~」。
 - **一键最小化**：右键选择后，把当前所有可见窗口全部最小化（不关闭）回到桌面，桌宠仍在原位。
   - 已知限制：Windows 权限隔离（UIPI）下，无法最小化以**管理员身份运行**的窗口（如管理员终端、任务管理器），这些会被静默跳过；其它虚拟桌面上的传统程序也会被一并最小化。
+- **琥珀（密码本）**：右键打开独立窗口，**输入关键词才检索**（模糊匹配名称/网址/备注）。密码经 Windows DPAPI 加密后才落库，明文只在内存短暂存在；点「显示密码」才解密，**12 秒后自动清屏**。支持新增/编辑/删除。
 - **开机自启动**：右键菜单里可开/关，开机自动常驻。
 
 ## 运行
@@ -81,6 +82,9 @@ logger.py        运行日志（pet.log）
 config.py        配置与路径（find_icon 自动扫描 assets/ 图标）
 db.py            SQLite 按天聚合（含全部历史与应用明细）
 db_todo.py       SQLite 待办数据层（todo 表）
+db_vault.py      SQLite 琥珀数据层（vault_accounts 表，只存密文）
+vault_crypto.py  琥珀加密层（Windows DPAPI，密钥不落盘）
+vault_search.py  琥珀模糊匹配（归一化 + 多字段加权打分，纯函数）
 listener.py      全局键盘监听
 tracker.py       线程安全计数 + 跨天滚动
 foreground.py    前台窗口检测（纯 ctypes，取当前 exe）
@@ -96,6 +100,7 @@ pet_ui/          界面包（拆分自原单文件）
   ├ heatmap.py     键盘热力图
   ├ app_stats.py   各软件分布（今天条形 / 近 7 天折线）
   ├ schedule.py    日程表（独立窗口 + 头顶角标）
+  ├ vault_ui.py    琥珀（搜索 + 解密显示 + 自动清屏）
   ├ table.py       历史表格
   ├ minimize.py    一键最小化（EnumWindows + ShowWindowAsync）
   └ theme.py       配色与参数常量

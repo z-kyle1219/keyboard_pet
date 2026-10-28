@@ -66,6 +66,7 @@ app_aliases.json
 .preview_*.png
 *_preview.png
 _weather_preview.png
+_preview_icon.png
 
 # 探测/临时文件
 _probe.txt
@@ -76,6 +77,11 @@ _test_*.py
 # 一次性工具脚本（抠图/预览生成，本地可复用，不入库）
 _cutout.py
 _frames_preview.py
+
+# 自检/草稿脚本（本地留存，不入库）
+_check_todo.py
+_deltest.txt
+_preview_weather_card.py
 
 # ===================== 编辑器 / IDE / 系统 =====================
 .vscode/
