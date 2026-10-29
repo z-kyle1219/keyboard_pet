@@ -66,6 +66,12 @@ def main():
         root.destroy()
         sys.exit(1)
 
+    # 全局热键：Ctrl+Alt+T 直译剪贴板（失败只记日志，不影响主流程）
+    try:
+        app.start_translate_hotkey()
+    except Exception:
+        logger.exception('翻译热键启动失败（不影响主流程）')
+
     # 后台线程：天气播报
     # show 在天气线程里被调用，必须用 root.after 甩回主线程再碰界面
     weather_state = WeatherState()
@@ -86,6 +92,10 @@ def main():
         logger.exception('主循环运行异常')
     finally:
         key_listener.stop()
+        try:
+            app.stop_translate_hotkey()
+        except Exception:
+            pass
         manager.persist()  # 退出前把当前次数落库
         app_tracker.persist()
         try:

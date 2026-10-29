@@ -11,6 +11,7 @@
 - AppStatsMixin   各软件分布（今天条形 / 近 7 天折线）
 - MinimizeMixin   一键最小化
 - VaultMixin      琥珀（密码存储：搜索 + 解密显示）
+- TranslateMixin  翻译（热键快译 + 输入框）
 
 对外接口保持 `from pet_ui import PetApp` 不变，UI 行为与拆分前一致。
 """
@@ -35,13 +36,14 @@ from pet_ui.renderer import (
 from pet_ui.schedule import ScheduleMixin
 from pet_ui.table import TableMixin
 from pet_ui.vault_ui import VaultMixin
+from pet_ui.translate_ui import TranslateMixin
 from pet_ui.weather_popup import WeatherMixin
 from pet_ui.theme import TRANSPARENT, TEXT_DARK
 
 
 class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
               AppStatsMixin, ScheduleMixin, WeatherMixin, MinimizeMixin,
-              VaultMixin):
+              VaultMixin, TranslateMixin):
     def __init__(self, root, manager, app_tracker=None):
         self.root = root
         self.manager = manager
@@ -84,6 +86,17 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
         self._vault_h = 200
         self._reveal_w = 260        # 密码气泡尺寸缓存
         self._reveal_h = 120
+        # ---------- 翻译 ----------
+        self._translate_win = None        # 翻译输入窗口
+        self._translate_entry = None      # 输入框（Text）
+        self._translate_result_win = None # 译文结果卡片
+        self._translate_w = 360           # 输入窗口尺寸缓存
+        self._translate_h = 180
+        self._result_w = 300              # 结果卡尺寸缓存
+        self._result_h = 140
+        self._translate_pending = 0       # 请求令牌（只认最后一次）
+        self._translate_hotkey = None     # pynput GlobalHotKeys 监听器
+        self._translate_last_hit = 0.0    # 热键节流时间戳
         self._setup_window()
         self._load_icon()
 
@@ -176,6 +189,11 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
         # 让密码显示气泡跟随桌宠
         if getattr(self, '_reveal_win', None) is not None:
             self._place_reveal_win()
+        # 让翻译输入窗口 / 结果卡片跟随桌宠
+        if getattr(self, '_translate_win', None) is not None:
+            self._place_translate_win()
+        if getattr(self, '_translate_result_win', None) is not None:
+            self._place_result_win()
         # 让关机提醒气泡跟随桌宠
         sw = getattr(self, '_shutdown_win', None)
         if sw is not None:
@@ -260,6 +278,8 @@ class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
         menu.add_command(label='键盘热力图', command=self._show_heatmap)
         menu.add_separator()
         menu.add_command(label='琥珀', command=self._show_vault)
+        menu.add_separator()
+        menu.add_command(label='翻译', command=self._show_translate)
         menu.add_separator()
         menu.add_command(label='一键最小化', command=self._minimize_all)
         menu.add_separator()

@@ -23,6 +23,7 @@ keyboard_pet/
 ├── app_aliases.py       # exe → 友好名 + 分类 的映射（读 app_aliases.json）
 ├── stats_export.py      # 稳定 JSON 出口（app_stats.json，供 AI 读取）
 ├── scheduler.py         # 后台线程：24:00 跨天刷新 + 周期落库 + JSON 导出
+├── translate.py         # 翻译（百度翻译 API：方向判断 + 内存 LRU 缓存，纯逻辑）
 ├── pet_ui/              # 桌宠界面包（原单文件 pet_ui.py 拆分而来）
 │   ├── __init__.py      # 对外导出 PetApp（导入方式保持不变）
 │   ├── theme.py         # 配色与渲染参数常量
@@ -34,9 +35,10 @@ keyboard_pet/
 │   ├── app_stats.py     # 各软件分布（今天=横向条形 / 近 7 天=折线）
 │   ├── schedule.py      # 日程表（独立窗口 + 头顶角标）
 │   ├── vault_ui.py      # 琥珀（密码存储：搜索 + 模糊匹配 + 点击解密 + 自动清屏）
+│   ├── translate_ui.py  # 翻译（热键快译 + 输入窗口 + 玄墨译文卡片）
 │   └── app.py           # PetApp 主类：窗口 / 图标 / 拖拽 / 右键菜单
 │
-├── tests/               # pytest 回归用例（琥珀加解密/模糊匹配、天气解析与循环、应用统计）
+├── tests/               # pytest 回归用例（琥珀加解密/模糊匹配、天气解析与循环、应用统计、翻译方向/缓存/错误兜底）
 ├── conftest.py          # pytest 配置（让 tests/ 可被自动发现）
 ├── scripts/             # 开发辅助脚本（非程序一部分）
 │   └── preview_weather_card.py  # 天气卡片离线预览生成
@@ -72,6 +74,7 @@ keyboard_pet/
 | **tracker.py** | 计数核心 | 线程安全 `Lock`；累计各键次数；跨天归档；重启恢复当天数据 |
 | **listener.py** | 键盘监听 | `pynput.keyboard.Listener`；仅键盘（含修饰键），鼠标不计 |
 | **scheduler.py** | 定时任务 | `midnight_loop` 等 24:00 跨天滚动；`periodic_save` 每 20s 落库并刷新 `app_stats.json` |
+| **translate.py** | 翻译 | 百度翻译 API；`detect_direction` 自动判方向（含汉字→译英）；内存 LRU 缓存；错误码转人话；**永不抛异常** |
 | **foreground.py** | 前台检测 | 纯 ctypes 调 Win32（GetForegroundWindow → PID → QueryFullProcessImageNameW），HWND→exe 缓存；不新增依赖 |
 | **app_usage.py** | 按应用统计 | 内存计数 + 每秒采样前台窗口累计秒数；跨天归档；线程安全 |
 | **app_aliases.py** | 别名表 | `app_aliases.json` 映射 exe → 友好名 + 分类（dev/terminal/browse/chat/work/media/other）；未命中兜底 other |
@@ -85,9 +88,10 @@ keyboard_pet/
 | **pet_ui/app_stats.py** | 各软件分布 | 顶层切换「今天 / 近 7 天」，两个视图都可切「次数 / 时长」；今天为横向条形（Top5、默认只显相对长度、点击展开当前指标的具体值）；近 7 天为折线（Top3）；Pillow 2x 超采样渲染（Canvas 手绘无抗锯齿会发毛） |
 | **pet_ui/schedule.py** | 日程表 | 独立日程窗口（卡片+勾选+进度条，第三列完整汉字日期时间）；头顶角标（临近截止变红） |
 | **pet_ui/vault_ui.py** | 琥珀界面 | 搜索窗口（**输入关键词才检索**、默认不铺条目名）、模糊匹配列表、双击/按钮解密显示、明文自动清屏、新增/编辑（密码留空即不改，密码框有小眼睛） |
-| **pet_ui/theme.py** | 常量 | 配色、DPI 与动画参数集中管理 |
+| **pet_ui/translate_ui.py** | 翻译界面 | `Ctrl+Alt+T` 正则热键读剪贴板；后台线程请求 + 令牌防串号；玄墨译文卡片（跟随桌宠、Esc/✕ 关闭）；右键手打窗口（Enter 翻译 / Shift+Enter 换行） |
+| **pet_ui/theme.py** | 常量 | 配色（含玄墨 `INK_*`，琥珀与翻译共用）、DPI 与动画参数集中管理 |
 
-> 拆分后各模块通过 Mixin 混入 `PetApp`（`AnimationMixin` / `PopupMixin` / `HeatmapMixin` / `TableMixin` / `ScheduleMixin`），
+> 拆分后各模块通过 Mixin 混入 `PetApp`（`AnimationMixin` / `PopupMixin` / `HeatmapMixin` / `TableMixin` / `ScheduleMixin` / `VaultMixin` / `TranslateMixin`），
 > `main.py` 的 `from pet_ui import PetApp` 无需任何改动，UI 行为与拆分前完全一致。
 
 ## 三、数据模型
@@ -208,6 +212,22 @@ CREATE TABLE vault_accounts (
   保存走 `db_vault.update_account()`（密码传 `None` 保持原值）。
   避免「删了重录」这种既费事又容易删错的操作。
 
+### 翻译（不落库）
+
+```
+复制文本 → Ctrl+Alt+T → translate.translate() → 玄墨译文卡片 → 关掉即散
+右键「翻译」→ 输入框手打 → Enter → 同一张卡片
+```
+
+- **不落库、不写历史**：翻译内容只在内存里走一趟，卡片关掉就没了。
+  退出程序后不留下任何查询痕迹（复制的内容会发给第三方，没必要持久化）。
+- **方向判断**：含汉字 → 译成英文，否则 → 译成中文（中英混排按中文算）；
+  最终以百度返回的 `from` 字段为准，不盲信本地判断。
+- **内存缓存**：进程内 LRU（`CACHE_SIZE=256`），同一个词/句不重复请求，
+  既省额度又让重复查询瞬回（卡片上会标「缓存」）。
+- **密钥**：`.env` 里的 `BAIDU_APPID` / `BAIDU_KEY`，不进代码、不进仓库；
+  没配置时只提示一句，不影响其它功能。
+
 ## 四、图标方案
 
 - **默认**：`find_icon()` 自动扫描 `assets/` 目录，优先选带透明通道的 PNG（人物轮廓最适合做桌宠），找不到透明图时回退到任意第一张图片（png/jpg/jpeg/gif/bmp）
@@ -240,6 +260,8 @@ python main.py
 | 右键 → 各软件分布 | 弹出分布窗口：顶部切「今天」（横向条形，Top5，点击条目展开次数+时长）/「近 7 天」（折线，Top3，可切「次数 / 时长」） |
 | 右键 → 键盘热力图 | 弹出 26 键实时热度面板 |
 | 右键 → 琥珀 | 打开琥珀搜索窗口（**输入名字才检索**，模糊匹配 + 点击解密显示；支持新增/编辑/删除） |
+| 右键 → 翻译 | 打开翻译输入窗口（**中英互译，自动判方向**），Enter 翻译 / Shift+Enter 换行 |
+| `Ctrl+Alt+T` | 复制任意文本后按下：**直译剪贴板**，译文卡片飘在桌宠头顶；剪贴板没文字则退化为打开输入窗口 |
 | 右键 → 一键最小化 | 最小化所有可见窗口回到桌面（不关闭） |
 | 右键 → 开机自启动 | 切换开关；勾选 = 开机自动常驻 |
 | 右键 → 退出 | 退出程序（自动落库） |
@@ -256,6 +278,7 @@ python main.py
 6. **时长采样防睡眠跳变**：`app_usage.tick()` 每帧最多累计 3 秒（`MAX_TICK_DELTA`），避免电脑休眠 8 小时后把整段时间全算到某个应用头上。
 7. **统计 JSON 原子写入**：`stats_export.write_json()` 先写 `.tmp` 再 `os.replace`，AI 不会读到写了一半的文件。
 8. **按键归属不丢**：每次按键都必须有归属——采样失败记入 `__unattributed__`（未识别），桌宠自己窗口（日程表/琥珀）里打的字记入 `__host__`（桌宠）。启动恢复时还会与 `daily_stats` 总数对一次账，把历史缺口也补进「未识别」。这样气泡的总次数与分布窗口的明细之和永远一致，不会出现 531 / 517 这种对不上的情况。
+9. **翻译不阻塞界面**：请求在后台线程跑，结果用 `root.after(0, …)` 甩回主线程再碰控件（与天气线程同一套路）；带请求令牌，连按 `Ctrl+Alt+T` 只显示最后一次的结果，不会被慢请求反向覆盖。热键监听、翻译请求任意一步失败都只记日志，不影响计数与呼吸动画。
 
 ## 八、UI 设计（已优化）
 

@@ -34,6 +34,15 @@ import vault_search
 from logger import logger
 from pet_ui.theme import (
     ACC_TODAY,
+    INK_ACCENT,
+    INK_BG,
+    INK_BORDER,
+    INK_DANGER,
+    INK_FAINT,
+    INK_INK,
+    INK_LINE,
+    INK_MUTED,
+    INK_TEXT,
     UI_BG,
     UI_BORDER,
     UI_MUTED,
@@ -46,21 +55,8 @@ from pet_ui.theme import (
 # 条目选中后，「显示密码」气泡会同时展示 名称 + 网址 + 备注 + 密码。
 REVEAL_SECONDS = 12
 
-# ============================================================
-# 密码气泡专属配色（玄墨极简）
-# ============================================================
-# 与「今日战报」的锡金国潮体系刻意分开：那里是玄黑 + 描金，
-# 这里用冷峻的墨灰 + 左侧细线，克制无装饰，工具感更强。
-# （左键展示 MVP 键仍走 popup.py 的锡金风格，互不影响。）
-INK_BG = '#2C2C2A'          # 卡片底（玄墨）
-INK_BORDER = '#444441'      # 外框
-INK_TEXT = '#F1EFE8'        # 主文字（亮墨白）
-INK_MUTED = '#888780'       # 次要文字
-INK_FAINT = '#5F5E5A'       # 极淡（倒计时 / 关闭钮）
-INK_ACCENT = '#D3D1C7'      # 强调 / 主按钮底（淡石色）
-INK_LINE = '#888780'        # 密码区左侧细线
-INK_INK = '#2C2C2A'         # 亮底上的深字（按钮文字）
-INK_DANGER = '#F09595'      # 悬停关闭（柔红）
+# 玄墨极简配色（玄墨卡片）已上移到 theme.py，由琥珀与翻译共用。
+# 左键展示 MVP 键仍走 popup.py 的锡金风格，互不影响。
 
 
 class VaultMixin:

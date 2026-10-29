@@ -21,6 +21,7 @@ listener.py（pynput 全局键盘监听，仅键盘）
   → db_vault.py（vault_accounts 琥珀表，只存密文）
   ↳ vault_crypto.py（Windows DPAPI 加解密）+ vault_search.py（模糊匹配，纯函数）
 scheduler.py（后台线程：24:00 跨天刷新 + 每 20s 落库）
+translate.py（翻译：百度翻译 API，纯逻辑 + 内存缓存，不落库）
 pet_ui/（界面包，各模块通过 Mixin 混入 PetApp）
 main.py（入口，全局 try/except 兜底，退出前落库）
 ```
@@ -35,6 +36,7 @@ main.py（入口，全局 try/except 兜底，退出前落库）
 - **落库容错**：`persist()` / 跨天归档都用 try/except 包住，写库失败只记日志，不拖垮程序。
 - **琥珀（密码存储）口径**：密码**永不存明文**——`vault_crypto.encrypt()`（Windows DPAPI）加密后才写 `vault_accounts`；明文只在内存短暂存在，不写日志、不进异常消息。模糊匹配在 `vault_search.py`（归一化 + 加权打分），不要改成 SQL 精确查询。UI 为搜索驱动：**空词不铺列表**。
 - **图标来源**：唯一真相是 `assets/`。`config.PET_ICON` 在导入时由 `find_icon()` 自动发现（优先带透明通道的 PNG）。换图只需替换 `assets/` 里的图片并重启，无配置文件、无运行时图标路径。
+- **翻译口径**：中英互译走百度翻译 API，密钥在 `.env`（`BAIDU_APPID` / `BAIDU_KEY`），不进代码。**翻译内容不落库、不写历史、不写日志**——查完即散。请求必须放后台线程（`root.after(0, ...)` 回主线程），绝不能在 UI 线程阻塞。
 
 ## 坑（真踩过的，别重犯）
 
