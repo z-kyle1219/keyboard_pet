@@ -250,8 +250,11 @@ def clear_idle_seconds(apps):
     return changed
 
 
-def get_daily_mvp():
+def get_daily_mvp(today=None):
     """返回全部历史 [(date, count, mvp_label)]，按日期倒序（最近的在最前）。
+
+    today: 可注入的「今天」，默认取系统日期。测试用它验证
+    「当天盲盒显示 ?」与「历史显示真实冠军」的分界，不必依赖运行时刻。
 
     mvp_label 形如 'e ×612' 或 'a 等2键 ×540'。
     冠军键仅从 26 个英文字母键里选出。
@@ -274,7 +277,7 @@ def get_daily_mvp():
     for d, k, c in key_rows:
         by_date[d][k] = c
 
-    today = datetime.now().strftime('%Y-%m-%d')
+    today = today or datetime.now().strftime('%Y-%m-%d')
     result = []
     for dt, cnt in rows:
         if dt == today:
