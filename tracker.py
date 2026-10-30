@@ -9,6 +9,16 @@ import db
 from logger import logger
 
 
+def _system_today():
+    """默认时间源：系统当天日期（YYYY-MM-DD）。
+
+    抽成模块级函数，是为了让 CountManager 能接收注入的 now_fn——
+    测试里把日期「拨」到次日，几毫秒就能验证跨天滚动，
+    不用等到真实零点，也不会在 23:59 跑测试时偶发失败。
+    """
+    return datetime.now().strftime('%Y-%m-%d')
+
+
 def key_to_name(key):
     """把 pynput 的 key 归一化成可入库/展示的字符串。
 
@@ -32,9 +42,11 @@ def key_to_name(key):
 class CountManager:
     """管理"今天已敲键次数"与"各键次数"，并在跨天时归档到数据库。"""
 
-    def __init__(self):
+    def __init__(self, now_fn=None):
         self._lock = threading.Lock()
-        self._today = datetime.now().strftime('%Y-%m-%d')
+        # 时间源：默认读系统日期；测试注入固定值以复现跨天
+        self._now = now_fn or _system_today
+        self._today = self._now()
         # 若当天重启程序，从数据库恢复已记录次数，避免清零
         self._count = db.get_count(self._today)
         self._key_counts = db.get_key_counts(self._today)
@@ -74,7 +86,7 @@ class CountManager:
         """
         notified_key = None
         with self._lock:
-            now = datetime.now().strftime('%Y-%m-%d')
+            now = self._now()
             if now != self._today:
                 # 跨天：先归档旧的一天，再开启新的一天
                 try:
@@ -139,7 +151,7 @@ class CountManager:
     def rollover(self):
         """跨天刷新：归档旧的一天，开启新的一天。"""
         with self._lock:
-            now = datetime.now().strftime('%Y-%m-%d')
+            now = self._now()
             if now != self._today:
                 db.save_count(self._today, self._count)
                 db.save_key_counts(self._today, self._key_counts)
