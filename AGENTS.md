@@ -31,7 +31,7 @@ main.py（入口，全局 try/except 兜底，退出前落库）
 ## 约定
 
 - **计数口径**：仅键盘（含修饰键），鼠标不计。长按一键时 pynput 自动重复触发 `on_press`，每次 +1。
-- **跨天**：`tracker.increment()` 每次 +1 前先检查日期，跨天立即归档再计数——不要依赖 `midnight_loop` 线程（它可能因休眠漏滚动）。
+- **跨天**：`tracker.increment()` 每次 +1 前先检查日期，跨天立即归档再计数——不要依赖 `midnight_loop` 线程（它可能因休眠漏滚动）。时间源走 `CountManager(now_fn=...)` 注入，新增跨天相关代码也用注入的 `self._now()`，不要在类里直接写 `datetime.now()`——否则跨天没法测。
 - **待办规则**：勾掉留一天（`done=1` 写入 `done_at`，当天显示次日隐藏）；未完成项自然顺延下一天；`due_at` 单字段既做排序又经 `format_due()` 转汉字展示。
 - **落库容错**：`persist()` / 跨天归档都用 try/except 包住，写库失败只记日志，不拖垮程序。
 - **琥珀（密码存储）口径**：密码**永不存明文**——`vault_crypto.encrypt()`（Windows DPAPI）加密后才写 `vault_accounts`；明文只在内存短暂存在，不写日志、不进异常消息。模糊匹配在 `vault_search.py`（归一化 + 加权打分），不要改成 SQL 精确查询。UI 为搜索驱动：**空词不铺列表**。

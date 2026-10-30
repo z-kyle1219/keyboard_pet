@@ -38,7 +38,7 @@ keyboard_pet/
 │   ├── translate_ui.py  # 翻译（热键快译 + 输入窗口 + 玄墨译文卡片）
 │   └── app.py           # PetApp 主类：窗口 / 图标 / 拖拽 / 右键菜单
 │
-├── tests/               # pytest 回归用例（琥珀加解密/模糊匹配、天气解析与循环、应用统计、翻译方向/缓存/错误兜底）
+├── tests/               # pytest 回归用例（琥珀加解密/模糊匹配、天气解析与循环、应用统计、翻译方向/缓存/错误兜底、跨天滚动、归属对账、7 天聚合窗口）
 ├── conftest.py          # pytest 配置（让 tests/ 可被自动发现）
 ├── scripts/             # 开发辅助脚本（非程序一部分）
 │   └── preview_weather_card.py  # 天气卡片离线预览生成
@@ -71,7 +71,7 @@ keyboard_pet/
 | **db_vault.py** | 琥珀数据层 | `vault_accounts` 表；**只存取密文**，不负责加解密；名称/密码必填，网址/备注选填 |
 | **vault_crypto.py** | 琥珀加密 | Windows DPAPI（CryptProtectData）加密/解密；密钥由系统绑定当前账户，不落盘 |
 | **vault_search.py** | 模糊匹配 | 归一化（大小写/分隔符）+ 多字段加权打分；纯函数、无副作用，便于测试 |
-| **tracker.py** | 计数核心 | 线程安全 `Lock`；累计各键次数；跨天归档；重启恢复当天数据 |
+| **tracker.py** | 计数核心 | 线程安全 `Lock`；累计各键次数；跨天归档；重启恢复当天数据；时间源可注入 `now_fn`（便于测试跨天，生产默认读系统日期） |
 | **listener.py** | 键盘监听 | `pynput.keyboard.Listener`；仅键盘（含修饰键），鼠标不计 |
 | **scheduler.py** | 定时任务 | `midnight_loop` 等 24:00 跨天滚动；`periodic_save` 每 20s 落库并刷新 `app_stats.json` |
 | **translate.py** | 翻译 | 百度翻译 API；`detect_direction` 自动判方向（含汉字→译英）；内存 LRU 缓存；错误码转人话；**永不抛异常** |
@@ -279,6 +279,7 @@ python main.py
 7. **统计 JSON 原子写入**：`stats_export.write_json()` 先写 `.tmp` 再 `os.replace`，AI 不会读到写了一半的文件。
 8. **按键归属不丢**：每次按键都必须有归属——采样失败记入 `__unattributed__`（未识别），桌宠自己窗口（日程表/琥珀）里打的字记入 `__host__`（桌宠）。启动恢复时还会与 `daily_stats` 总数对一次账，把历史缺口也补进「未识别」。这样气泡的总次数与分布窗口的明细之和永远一致，不会出现 531 / 517 这种对不上的情况。
 9. **翻译不阻塞界面**：请求在后台线程跑，结果用 `root.after(0, …)` 甩回主线程再碰控件（与天气线程同一套路）；带请求令牌，连按 `Ctrl+Alt+T` 只显示最后一次的结果，不会被慢请求反向覆盖。热键监听、翻译请求任意一步失败都只记日志，不影响计数与呼吸动画。
+10. **时间源可注入**：`CountManager(now_fn=...)` 接收一个返回 `'YYYY-MM-DD'` 的函数（默认 `datetime.now()`），`db.get_daily_mvp(today=...)` 同理。跨天滚动、重启恢复、盲盒 MVP 这些依赖「今天是几号」的逻辑因此可以在测试里把日期直接拨到次日，不必等真实零点、也不会因为测试跑在 23:59 而偶发失败。`AppUsageTracker` / `weather_loop` 原本就有同类注入参数，口径一致。
 
 ## 八、UI 设计（已优化）
 
