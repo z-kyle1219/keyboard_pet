@@ -9,7 +9,9 @@
 - HeatmapMixin    键盘热力图
 - TableMixin      历史表格
 - AppStatsMixin   各软件分布（今天条形 / 近 7 天折线）
+- CreditMixin     积分台账（WorkBuddy 消耗：今日 / 累计 / 近 14 天）
 - MinimizeMixin   一键最小化
+- DiskMixin       C 盘体检（只读：识别 + 报路径，不删不动）
 - VaultMixin      琥珀（密码存储：搜索 + 解密显示）
 - TranslateMixin  翻译（热键快译 + 输入框）
 
@@ -24,6 +26,8 @@ import config
 from logger import logger
 from pet_ui.animations import AnimationMixin
 from pet_ui.app_stats import AppStatsMixin
+from pet_ui.credit_ui import CreditMixin
+from pet_ui.disk_ui import DiskMixin
 from pet_ui.heatmap import HeatmapMixin
 from pet_ui.minimize import MinimizeMixin
 from pet_ui.popup import PopupMixin
@@ -42,8 +46,8 @@ from pet_ui.theme import TRANSPARENT, TEXT_DARK
 
 
 class PetApp(AnimationMixin, PopupMixin, HeatmapMixin, TableMixin,
-              AppStatsMixin, ScheduleMixin, WeatherMixin, MinimizeMixin,
-              VaultMixin, TranslateMixin):
+              AppStatsMixin, CreditMixin, ScheduleMixin, WeatherMixin,
+              MinimizeMixin, DiskMixin, VaultMixin, TranslateMixin):
     def __init__(self, root, manager, app_tracker=None):
         self.root = root
         self.manager = manager

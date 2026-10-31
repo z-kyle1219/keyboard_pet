@@ -22,8 +22,10 @@ keyboard_pet/
 ├── app_usage.py         # 按应用统计（敲键次数 + 前台停留秒数 + 跨天归档）
 ├── app_aliases.py       # exe → 友好名 + 分类 的映射（读 app_aliases.json）
 ├── stats_export.py      # 稳定 JSON 出口（app_stats.json，供 AI 读取）
+├── credit_stats.py      # 积分台账数据层（只读 WorkBuddy 本地库 → 每日/累计积分）
 ├── scheduler.py         # 后台线程：24:00 跨天刷新 + 周期落库 + JSON 导出
 ├── translate.py         # 翻译（百度翻译 API：方向判断 + 内存 LRU 缓存，纯逻辑）
+├── disk_audit.py        # C 盘只读体检（三层识别 + 规则表；只统计，不删不移）
 ├── pet_ui/              # 桌宠界面包（原单文件 pet_ui.py 拆分而来）
 │   ├── __init__.py      # 对外导出 PetApp（导入方式保持不变）
 │   ├── theme.py         # 配色与渲染参数常量
@@ -75,10 +77,12 @@ keyboard_pet/
 | **listener.py** | 键盘监听 | `pynput.keyboard.Listener`；仅键盘（含修饰键），鼠标不计 |
 | **scheduler.py** | 定时任务 | `midnight_loop` 等 24:00 跨天滚动；`periodic_save` 每 20s 落库并刷新 `app_stats.json` |
 | **translate.py** | 翻译 | 百度翻译 API；`detect_direction` 自动判方向（含汉字→译英）；内存 LRU 缓存；错误码转人话；**永不抛异常** |
+| **disk_audit.py** | C 盘体检（纯逻辑） | 三层识别：L1 环境变量 + `SHGetKnownFolderPath`（跨用户名/OneDrive 重定向）、L2 目录名/后缀模式（跨机器）、L3 内容特征（孤儿判定）；**只读**，只 `scandir`/`stat`，不删不移；扫描带时间预算 |
 | **foreground.py** | 前台检测 | 纯 ctypes 调 Win32（GetForegroundWindow → PID → QueryFullProcessImageNameW），HWND→exe 缓存；不新增依赖 |
 | **app_usage.py** | 按应用统计 | 内存计数 + 每秒采样前台窗口累计秒数；跨天归档；线程安全 |
 | **app_aliases.py** | 别名表 | `app_aliases.json` 映射 exe → 友好名 + 分类（dev/terminal/browse/chat/work/media/other）；未命中兜底 other |
 | **stats_export.py** | JSON 出口 | 生成结构固定的 `app_stats.json`（今天 + 近 7 天，含 count/seconds/占比），AI 可直接读 |
+| **credit_stats.py** | 积分台账数据 | 只读 `%USERPROFILE%\.workbuddy\workbuddy.db`（先拷 db+wal 到临时目录再打开，不碰原文件）；`session_usage.credit_json` 求和得会话积分；读不到库时退回台账 CSV；20s 缓存；**永不抛异常** |
 | **pet_ui/app.py** | 界面主类 | 透明漂浮窗（人物轮廓+阴影）、拖拽拎起、右键菜单、帧预生成 |
 | **pet_ui/renderer.py** | 图像渲染 | `_prepare_pet` / `_make_shadow` / `_compose_frame` / `frame_to_photo` / 占位图 |
 | **pet_ui/animations.py** | 动画 | 呼吸循环、点击挤压回弹、拖拽拎起状态机 |
